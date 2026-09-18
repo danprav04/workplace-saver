@@ -1,0 +1,51 @@
+## Build & Publish outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+publish/
+Publish/
+**/publish/
+**/Publish/
+[Ll]og/
+[Ll]ogs/
+TestResults/
+[Tt]est[Rr]esult*/
+
+## Visual Studio & IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+
+## Package / dependency caches
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+
+## Local database, cache & runtime data
+*.db
+*.db-shm
+*.db-wal
+Thumbnails/
+*.tmp
+*.log
+
+## OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
