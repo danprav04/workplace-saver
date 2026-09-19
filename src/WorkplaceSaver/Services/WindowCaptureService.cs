@@ -69,12 +69,18 @@ namespace WorkplaceSaver.Services
                 // Check for icon
                 string? iconBase64 = ScreenshotService.ExtractIconBase64(exePath);
 
+                // If Explorer window, capture its active folder path
+                string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
+                    ? GetExplorerFolderPath(hWnd) 
+                    : null;
+
                 var snapshot = new WindowSnapshot
                 {
                     Id = Guid.NewGuid().ToString(),
                     WorkspaceId = workspaceId,
                     ProcessName = processName,
                     ExecutablePath = exePath,
+                    CommandLine = commandLine,
                     WindowTitle = title,
                     ClassName = className,
                     ShowCmd = wp.showCmd,
@@ -194,6 +200,41 @@ namespace WorkplaceSaver.Services
                 NativeMethods.CloseHandle(hProcess);
             }
 
+            return null;
+        }
+
+        public static string? GetExplorerFolderPath(IntPtr hWnd)
+        {
+            try
+            {
+                Type? shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType == null) return null;
+                dynamic? shell = Activator.CreateInstance(shellType);
+                if (shell == null) return null;
+                dynamic windows = shell.Windows();
+                int count = windows.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    try
+                    {
+                        dynamic item = windows.Item(i);
+                        if (item != null && (long)item.HWND == (long)hWnd)
+                        {
+                            string? path = item.Document?.Folder?.Self?.Path;
+                            if (!string.IsNullOrWhiteSpace(path))
+                                return path;
+
+                            string? url = item.LocationURL;
+                            if (!string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.IsFile)
+                            {
+                                return uri.LocalPath;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
             return null;
         }
     }

@@ -6,8 +6,8 @@ if (-not (Test-Path $targetExe)) {
     & $dotnet publish (Join-Path (Split-Path $PSScriptRoot -Parent) "src\WorkplaceSaver\WorkplaceSaver.csproj") -c Release -o (Join-Path (Split-Path $PSScriptRoot -Parent) "publish")
 }
 
-# Add to Current User Run Registry
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WorkplaceSaver" -Value "`"$targetExe`""
+# Add to Current User Run Registry with --startup flag so it runs silently in the tray
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WorkplaceSaver" -Value "`"$targetExe`" --startup"
 
 Write-Host "✅ Workplace Saver added to Windows Startup successfully!" -ForegroundColor Green
 Write-Host "Registry path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -ForegroundColor DarkGray

@@ -51,13 +51,13 @@ namespace WorkplaceSaver.Views
             Close();
         }
 
-        private void OnInputKeyDown(object sender, KeyEventArgs e)
+        private void OnInputKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
-            if (e.Key == Key.Enter)
+            if (e.Key == System.Windows.Input.Key.Enter)
             {
                 OnSaveClick(sender, e);
             }
-            else if (e.Key == Key.Escape)
+            else if (e.Key == System.Windows.Input.Key.Escape)
             {
                 OnCancelClick(sender, e);
             }

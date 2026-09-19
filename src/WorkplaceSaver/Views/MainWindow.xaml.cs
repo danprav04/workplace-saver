@@ -23,8 +23,19 @@ namespace WorkplaceSaver.Views
 
             Loaded += async (s, e) =>
             {
-                await _viewModel.LoadWorkspacesAsync();
+                App.Log("MainWindow Loaded event started.");
+                try
+                {
+                    await _viewModel.LoadWorkspacesAsync();
+                    App.Log("MainWindow LoadWorkspacesAsync completed.");
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"Error in LoadWorkspacesAsync: {ex}");
+                }
             };
+
+            Closed += (s, e) => App.Log("MainWindow Closed event fired.");
         }
 
         private void OnTitleBarMouseDown(object sender, MouseButtonEventArgs e)

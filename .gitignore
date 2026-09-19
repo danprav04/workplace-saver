@@ -1,6 +1,7 @@
 ## Build & Publish outputs
 [Bb]in/
 [Oo]bj/
+*.obj
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/

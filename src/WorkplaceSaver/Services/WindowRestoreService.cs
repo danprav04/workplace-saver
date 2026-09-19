@@ -65,12 +65,13 @@ namespace WorkplaceSaver.Services
         private static IntPtr FindExistingWindow(WindowSnapshot snapshot)
         {
             IntPtr foundHwnd = IntPtr.Zero;
+            bool isExplorer = snapshot.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
 
             // Look for running process matching ProcessName
             var processes = Process.GetProcessesByName(snapshot.ProcessName);
             var targetPids = new HashSet<uint>(processes.Select(p => (uint)p.Id));
 
-            if (targetPids.Count == 0)
+            if (targetPids.Count == 0 && !isExplorer)
                 return IntPtr.Zero;
 
             NativeMethods.EnumWindows((hWnd, lParam) =>
@@ -82,20 +83,52 @@ namespace WorkplaceSaver.Services
                 if (!targetPids.Contains(pid))
                     return true;
 
-                // Match by title or class if multiple windows exist
+                // Match class name
+                var sbClass = new StringBuilder(256);
+                NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
+                string className = sbClass.ToString();
+
                 int titleLength = NativeMethods.GetWindowTextLength(hWnd);
                 var sbTitle = new StringBuilder(titleLength + 1);
                 NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
-                string title = sbTitle.ToString();
+                string title = sbTitle.ToString().Trim();
 
-                // If window has a title and matches snapshot title or partial title
+                if (isExplorer)
+                {
+                    // File Explorer folder windows MUST have CabinetWClass
+                    if (!className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                        (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                         title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                         snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        foundHwnd = hWnd;
+                        return false;
+                    }
+
+                    // Also check via COM folder path
+                    if (!string.IsNullOrEmpty(snapshot.CommandLine))
+                    {
+                        string? folder = WindowCaptureService.GetExplorerFolderPath(hWnd);
+                        if (folder != null && folder.Equals(snapshot.CommandLine, StringComparison.OrdinalIgnoreCase))
+                        {
+                            foundHwnd = hWnd;
+                            return false;
+                        }
+                    }
+
+                    return true; // Never match other shell windows for explorer
+                }
+
+                // Match by title for regular apps
                 if (!string.IsNullOrEmpty(snapshot.WindowTitle) && title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase))
                 {
                     foundHwnd = hWnd;
                     return false; // stop enumeration
                 }
 
-                // Or if it's the main candidate
                 if (foundHwnd == IntPtr.Zero && titleLength > 0)
                 {
                     foundHwnd = hWnd;
@@ -109,25 +142,107 @@ namespace WorkplaceSaver.Services
 
         private static async Task<IntPtr> LaunchAndFindWindowAsync(WindowSnapshot snapshot)
         {
-            if (string.IsNullOrWhiteSpace(snapshot.ExecutablePath) || !File.Exists(snapshot.ExecutablePath))
-                return IntPtr.Zero;
+            bool isExplorer = snapshot.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
 
             try
             {
-                var psi = new ProcessStartInfo
+                if (isExplorer)
+                {
+                    // Resolve target folder path
+                    string? targetFolder = !string.IsNullOrWhiteSpace(snapshot.CommandLine) ? snapshot.CommandLine : null;
+
+                    if (string.IsNullOrWhiteSpace(targetFolder) && !string.IsNullOrWhiteSpace(snapshot.WindowTitle))
+                    {
+                        // Check common locations if WindowTitle is the folder name
+                        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        string[] candidates = new[]
+                        {
+                            Path.Combine(userProfile, snapshot.WindowTitle),
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), snapshot.WindowTitle),
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), snapshot.WindowTitle),
+                            Path.Combine(userProfile, "Downloads", snapshot.WindowTitle)
+                        };
+
+                        foreach (var c in candidates)
+                        {
+                            if (Directory.Exists(c))
+                            {
+                                targetFolder = c;
+                                break;
+                            }
+                        }
+                    }
+
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = !string.IsNullOrWhiteSpace(targetFolder) ? $"\"{targetFolder}\"" : string.Empty,
+                        UseShellExecute = true
+                    };
+
+                    Process.Start(psi);
+
+                    // Poll for CabinetWClass window
+                    for (int i = 0; i < 35; i++)
+                    {
+                        await Task.Delay(150);
+
+                        IntPtr foundCabinetHwnd = IntPtr.Zero;
+                        NativeMethods.EnumWindows((hWnd, lParam) =>
+                        {
+                            if (!NativeMethods.IsWindowVisible(hWnd)) return true;
+
+                            var sbClass = new StringBuilder(256);
+                            NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
+                            if (!sbClass.ToString().Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase)) return true;
+
+                            int titleLength = NativeMethods.GetWindowTextLength(hWnd);
+                            var sbTitle = new StringBuilder(titleLength + 1);
+                            NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
+                            string title = sbTitle.ToString().Trim();
+
+                            if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                                (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                 title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                 snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                foundCabinetHwnd = hWnd;
+                                return false;
+                            }
+
+                            if (foundCabinetHwnd == IntPtr.Zero && titleLength > 0)
+                            {
+                                foundCabinetHwnd = hWnd;
+                            }
+
+                            return true;
+                        }, IntPtr.Zero);
+
+                        if (foundCabinetHwnd != IntPtr.Zero)
+                            return foundCabinetHwnd;
+                    }
+
+                    return IntPtr.Zero;
+                }
+
+                if (string.IsNullOrWhiteSpace(snapshot.ExecutablePath) || !File.Exists(snapshot.ExecutablePath))
+                    return IntPtr.Zero;
+
+                var regularPsi = new ProcessStartInfo
                 {
                     FileName = snapshot.ExecutablePath,
+                    Arguments = snapshot.CommandLine ?? string.Empty,
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(snapshot.ExecutablePath) ?? string.Empty
                 };
 
-                var proc = Process.Start(psi);
+                var proc = Process.Start(regularPsi);
                 if (proc == null) return IntPtr.Zero;
 
                 uint launchedPid = (uint)proc.Id;
 
-                // Poll for the window to appear (up to 4.5 seconds)
-                for (int i = 0; i < 30; i++)
+                // Poll for the window to appear (up to 5 seconds)
+                for (int i = 0; i < 35; i++)
                 {
                     await Task.Delay(150);
 
