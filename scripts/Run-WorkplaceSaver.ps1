@@ -52,7 +52,8 @@ public class AppLauncher {
         si.lpDesktop = @"WinSta0\Default";
         PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
         string cmd = "\"" + exe + "\" " + args;
-        bool res = CreateProcess(null, cmd, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, null, ref si, out pi);
+        // CREATE_NEW_PROCESS_GROUP = 0x00000200
+        bool res = CreateProcess(null, cmd, IntPtr.Zero, IntPtr.Zero, false, 0x00000200, IntPtr.Zero, null, ref si, out pi);
         return res ? (int)pi.dwProcessId : -Marshal.GetLastWin32Error();
     }
 }
