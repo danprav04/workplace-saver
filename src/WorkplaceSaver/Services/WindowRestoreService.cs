@@ -34,12 +34,13 @@ namespace WorkplaceSaver.Services
 
             // Sort windows by Z-order (background first, foreground last)
             var orderedWindows = workspace.Windows.OrderBy(w => w.ZOrder).ToList();
+            var claimedHwnds = new HashSet<IntPtr>();
 
             foreach (var windowSnapshot in orderedWindows)
             {
                 try
                 {
-                    IntPtr hWnd = FindExistingWindow(windowSnapshot);
+                    IntPtr hWnd = FindExistingWindow(windowSnapshot, claimedHwnds);
 
                     if (hWnd == IntPtr.Zero)
                     {
@@ -49,6 +50,7 @@ namespace WorkplaceSaver.Services
 
                     if (hWnd != IntPtr.Zero)
                     {
+                        claimedHwnds.Add(hWnd);
                         ApplyWindowPlacement(hWnd, windowSnapshot, vLeft, vTop, vRight, vBottom, primaryWidth, primaryHeight);
                         restoredCount++;
                     }
@@ -62,7 +64,7 @@ namespace WorkplaceSaver.Services
             return restoredCount;
         }
 
-        private static IntPtr FindExistingWindow(WindowSnapshot snapshot)
+        private static IntPtr FindExistingWindow(WindowSnapshot snapshot, HashSet<IntPtr>? claimedHwnds = null)
         {
             IntPtr foundHwnd = IntPtr.Zero;
             bool isExplorer = snapshot.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
@@ -76,6 +78,9 @@ namespace WorkplaceSaver.Services
 
             NativeMethods.EnumWindows((hWnd, lParam) =>
             {
+                if (claimedHwnds != null && claimedHwnds.Contains(hWnd))
+                    return true;
+
                 if (!NativeMethods.IsWindowVisible(hWnd))
                     return true;
 
@@ -153,24 +158,7 @@ namespace WorkplaceSaver.Services
 
                     if (string.IsNullOrWhiteSpace(targetFolder) && !string.IsNullOrWhiteSpace(snapshot.WindowTitle))
                     {
-                        // Check common locations if WindowTitle is the folder name
-                        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                        string[] candidates = new[]
-                        {
-                            Path.Combine(userProfile, snapshot.WindowTitle),
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), snapshot.WindowTitle),
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), snapshot.WindowTitle),
-                            Path.Combine(userProfile, "Downloads", snapshot.WindowTitle)
-                        };
-
-                        foreach (var c in candidates)
-                        {
-                            if (Directory.Exists(c))
-                            {
-                                targetFolder = c;
-                                break;
-                            }
-                        }
+                        targetFolder = FindFolderByTitle(snapshot.WindowTitle);
                     }
 
                     var psi = new ProcessStartInfo
@@ -277,12 +265,66 @@ namespace WorkplaceSaver.Services
             return IntPtr.Zero;
         }
 
-        private static bool IsChildOrSiblingProcess(uint pid, string processName)
+        private static string? FindFolderByTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return null;
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            string downloads = Path.Combine(userProfile, "Downloads");
+            string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+
+            // Direct root checks first
+            string[] directPaths = new[]
+            {
+                Path.Combine(userProfile, title),
+                Path.Combine(docs, title),
+                Path.Combine(desktop, title),
+                Path.Combine(downloads, title),
+                Path.Combine(pictures, title)
+            };
+
+            foreach (var p in directPaths)
+            {
+                if (Directory.Exists(p)) return p;
+            }
+
+            // Recursive search up to 3 levels deep in Documents, Desktop, Pictures, UserProfile
+            string[] searchRoots = new[] { docs, desktop, pictures, userProfile };
+            foreach (var root in searchRoots)
+            {
+                try
+                {
+                    if (!Directory.Exists(root)) continue;
+                    var subdirs = Directory.GetDirectories(root, "*", new EnumerationOptions
+                    {
+                        RecurseSubdirectories = true,
+                        MaxRecursionDepth = 3,
+                        IgnoreInaccessible = true
+                    });
+
+                    foreach (var sub in subdirs)
+                    {
+                        if (Path.GetFileName(sub).Equals(title, StringComparison.OrdinalIgnoreCase))
+                        {
+                            App.Log($"[WindowRestore] FindFolderByTitle resolved '{title}' to '{sub}'");
+                            return sub;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return null;
+        }
+
+        private static bool IsChildOrSiblingProcess(uint pid, string targetProcessName)
         {
             try
             {
                 using var p = Process.GetProcessById((int)pid);
-                return p.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase);
+                return p.ProcessName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase);
             }
             catch
             {

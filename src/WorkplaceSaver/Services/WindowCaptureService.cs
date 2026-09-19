@@ -71,7 +71,7 @@ namespace WorkplaceSaver.Services
 
                 // If Explorer window, capture its active folder path
                 string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
-                    ? GetExplorerFolderPath(hWnd) 
+                    ? GetExplorerFolderPath(hWnd, title) 
                     : null;
 
                 var snapshot = new WindowSnapshot
@@ -203,7 +203,7 @@ namespace WorkplaceSaver.Services
             return null;
         }
 
-        public static string? GetExplorerFolderPath(IntPtr hWnd)
+        public static string? GetExplorerFolderPath(IntPtr hWnd, string? windowTitle = null)
         {
             try
             {
@@ -213,28 +213,73 @@ namespace WorkplaceSaver.Services
                 if (shell == null) return null;
                 dynamic windows = shell.Windows();
                 int count = windows.Count;
+
+                long targetHwndRaw = hWnd.ToInt64() & 0xFFFFFFFFL;
+
                 for (int i = 0; i < count; i++)
                 {
                     try
                     {
                         dynamic item = windows.Item(i);
-                        if (item != null && (long)item.HWND == (long)hWnd)
-                        {
-                            string? path = item.Document?.Folder?.Self?.Path;
-                            if (!string.IsNullOrWhiteSpace(path))
-                                return path;
+                        if (item == null) continue;
 
-                            string? url = item.LocationURL;
-                            if (!string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.IsFile)
+                        long itemHwndRaw = Convert.ToInt64(item.HWND) & 0xFFFFFFFFL;
+                        IntPtr itemHwnd = new IntPtr(itemHwndRaw);
+                        IntPtr root = NativeMethods.GetAncestor(itemHwnd, NativeMethods.GA_ROOT);
+                        long rootHwndRaw = root.ToInt64() & 0xFFFFFFFFL;
+                        IntPtr rootOwner = NativeMethods.GetAncestor(itemHwnd, NativeMethods.GA_ROOTOWNER);
+                        long rootOwnerHwndRaw = rootOwner.ToInt64() & 0xFFFFFFFFL;
+
+                        string locationName = "";
+                        try { locationName = item.LocationName ?? ""; } catch { }
+
+                        bool isHwndMatch = (itemHwndRaw == targetHwndRaw) || 
+                                           (rootHwndRaw == targetHwndRaw) || 
+                                           (rootOwnerHwndRaw == targetHwndRaw);
+
+                        bool isTitleMatch = !string.IsNullOrEmpty(windowTitle) && 
+                                            !string.IsNullOrEmpty(locationName) &&
+                                            (locationName.Equals(windowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                             windowTitle.Contains(locationName, StringComparison.OrdinalIgnoreCase));
+
+                        if (isHwndMatch || isTitleMatch)
+                        {
+                            // 1. Try Document.Folder.Self.Path
+                            try
                             {
-                                return uri.LocalPath;
+                                string? path = item.Document?.Folder?.Self?.Path;
+                                if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                                {
+                                    App.Log($"[WindowCapture] Explorer match found by Document path: {path}");
+                                    return path;
+                                }
                             }
+                            catch { }
+
+                            // 2. Try LocationURL
+                            try
+                            {
+                                string? url = item.LocationURL;
+                                if (!string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.IsFile)
+                                {
+                                    string localPath = uri.LocalPath;
+                                    if (Directory.Exists(localPath))
+                                    {
+                                        App.Log($"[WindowCapture] Explorer match found by LocationURL: {localPath}");
+                                        return localPath;
+                                    }
+                                }
+                            }
+                            catch { }
                         }
                     }
                     catch { }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                App.Log($"[WindowCapture] GetExplorerFolderPath error: {ex.Message}");
+            }
             return null;
         }
     }
