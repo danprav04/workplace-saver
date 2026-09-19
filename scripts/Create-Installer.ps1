@@ -156,17 +156,21 @@ Write-Host "  - checksums.txt" -ForegroundColor Gray
 if ($UploadRelease) {
     Write-Host "`n[5/5] Uploading to GitHub Releases..." -ForegroundColor Yellow
 
-    # Ensure GH_TOKEN is available if not logged in
-    $ghAuthCheck = (& gh auth status 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  gh CLI not logged in directly. Fetching token from Git Credential Manager..." -ForegroundColor Gray
+    # Temporarily set ErrorAction to Continue for external tools
+    $origEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    # Ensure GH_TOKEN is available
+    if (-not $env:GH_TOKEN) {
         $gcmPath = "C:\Program Files\Git\mingw64\bin\git-credential-manager.exe"
         if (Test-Path $gcmPath) {
-            $creds = "protocol=https`r`nhost=github.com`r`n`r`n" | & $gcmPath get
-            $tokenMatch = ($creds | Select-String "password=(.*)").Matches
-            if ($tokenMatch) {
-                $env:GH_TOKEN = $tokenMatch.Groups[1].Value.Trim()
-                Write-Host "  Authentication token loaded from Git Credential Manager." -ForegroundColor Gray
+            Write-Host "  Fetching GitHub token from Git Credential Manager..." -ForegroundColor Gray
+            $gcmInput = @("protocol=https", "host=github.com", "")
+            $creds = $gcmInput | & $gcmPath get 2>$null
+            $tokenLine = $creds | Select-String "password="
+            if ($tokenLine) {
+                $env:GH_TOKEN = ($tokenLine -replace "^password=", "").Trim()
+                Write-Host "  Authentication token loaded successfully." -ForegroundColor Gray
             }
         }
     }
@@ -199,26 +203,40 @@ Save your entire desktop workspace with a single keystroke and restore it anytim
 ```
 '@
     $releaseNotes = [string]::Format($releaseNotesTemplate, $Version, $installerName, $portableZipName, $setupHash, $zipHash)
+    $notesFile = Join-Path $DistDir "release-notes.md"
+    [System.IO.File]::WriteAllText($notesFile, $releaseNotes, [System.Text.Encoding]::UTF8)
 
-    Write-Host "  Creating release '$tag' on GitHub..." -ForegroundColor Cyan
-    $ghArgs = @(
-        "release", "create", $tag,
-        $installerPath,
-        $portableZipPath,
-        $checksumsFile,
-        "--title", $title,
-        "--notes", $releaseNotes
-    )
+    # Check if release already exists
+    $existingRelease = & gh release view $tag 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Release '$tag' already exists. Updating release notes and uploading assets..." -ForegroundColor Cyan
+        & gh release edit $tag --title $title -F $notesFile
+        & gh release upload $tag $installerPath $portableZipPath $checksumsFile --clobber
+    } else {
+        Write-Host "  Creating release '$tag' on GitHub..." -ForegroundColor Cyan
+        $ghArgs = @(
+            "release", "create", $tag,
+            $installerPath,
+            $portableZipPath,
+            $checksumsFile,
+            "--title", $title,
+            "-F", $notesFile
+        )
 
-    if ($Prerelease) {
-        $ghArgs += "--prerelease"
+        if ($Prerelease) {
+            $ghArgs += "--prerelease"
+        }
+
+        & gh @ghArgs
     }
 
-    & gh @ghArgs
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "`n[OK] Successfully created GitHub Release '$tag'!" -ForegroundColor Green
+    $uploadExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $origEap
+
+    if ($uploadExitCode -eq 0) {
+        Write-Host "`n[OK] Successfully published GitHub Release '$tag'!" -ForegroundColor Green
     } else {
-        Write-Error "Failed to create GitHub release. Exit code: $LASTEXITCODE"
+        Write-Error "Failed to create/update GitHub release. Exit code: $uploadExitCode"
     }
 } else {
     Write-Host "`n[5/5] Skipping GitHub upload (-UploadRelease was not specified)." -ForegroundColor Gray
