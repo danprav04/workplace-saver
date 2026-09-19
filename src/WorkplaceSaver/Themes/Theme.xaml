@@ -471,7 +471,8 @@
         <Setter Property="Background" Value="{StaticResource SurfaceRecessedBrush}" />
         <Setter Property="BorderBrush" Value="#2A2C38" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="12,10" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="SelectionBrush" Value="#505E6AD2" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="Template">
@@ -491,12 +492,13 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="8"
-                                Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
-                            <Grid>
+                            <Grid Margin="12,0">
                                 <ScrollViewer x:Name="PART_ContentHost"
-                                              VerticalAlignment="Center"
-                                              Focusable="False" />
+                                              Focusable="False"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              VerticalScrollBarVisibility="Hidden"
+                                              VerticalAlignment="Center" />
 
                                 <!-- Placeholder / Watermark driven by Tag property -->
                                 <TextBlock Text="{TemplateBinding Tag}"
@@ -504,7 +506,6 @@
                                            FontSize="{TemplateBinding FontSize}"
                                            FontFamily="{TemplateBinding FontFamily}"
                                            VerticalAlignment="Center"
-                                           Margin="2,0,0,0"
                                            IsHitTestVisible="False">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">

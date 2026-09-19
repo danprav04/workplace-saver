@@ -60,6 +60,10 @@ namespace WorkplaceSaver.Tests
                     dlg.Show();
                     dlg.UpdateLayout();
 
+                    var tb = dlg.FindName("NameTextBox") as System.Windows.Controls.TextBox;
+                    Assert.NotNull(tb);
+                    Assert.Equal("Test Preview", tb.Text);
+
                     win.Close();
                     dlg.Close();
                     tcs.SetResult(true);
