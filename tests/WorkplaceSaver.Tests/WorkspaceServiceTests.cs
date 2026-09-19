@@ -193,5 +193,51 @@ namespace WorkplaceSaver.Tests
             vm.SearchQuery = string.Empty;
             await Task.Delay(200);
         }
+
+        [Fact]
+        public void MultiMonitor_DetectionAndCoordinateIntegrity_PreservesBounds()
+        {
+            // Test that MonitorFromRect detects primary monitor
+            var primaryRect = new WorkplaceSaver.Native.NativeMethods.RECT
+            {
+                Left = 100,
+                Top = 100,
+                Right = 500,
+                Bottom = 500
+            };
+            IntPtr primaryMon = WorkplaceSaver.Native.NativeMethods.MonitorFromRect(
+                ref primaryRect, 
+                WorkplaceSaver.Native.NativeMethods.MONITOR_DEFAULTTONEAREST);
+            Assert.NotEqual(IntPtr.Zero, primaryMon);
+
+            var mi = new WorkplaceSaver.Native.NativeMethods.MONITORINFO
+            {
+                cbSize = System.Runtime.InteropServices.Marshal.SizeOf<WorkplaceSaver.Native.NativeMethods.MONITORINFO>()
+            };
+            bool gotInfo = WorkplaceSaver.Native.NativeMethods.GetMonitorInfo(primaryMon, ref mi);
+            Assert.True(gotInfo);
+            Assert.True(mi.rcMonitor.Width > 0);
+            Assert.True(mi.rcMonitor.Height > 0);
+
+            // Test captured windows preserve valid coordinates
+            var ws = WindowCaptureService.CaptureCurrentWorkspace("Placement Test", "test");
+            Assert.NotNull(ws);
+            foreach (var win in ws.Windows)
+            {
+                var rect = new WorkplaceSaver.Native.NativeMethods.RECT
+                {
+                    Left = win.NormalLeft,
+                    Top = win.NormalTop,
+                    Right = win.NormalRight,
+                    Bottom = win.NormalBottom
+                };
+
+                // The captured rect should intersect at least one monitor on the system
+                IntPtr hMon = WorkplaceSaver.Native.NativeMethods.MonitorFromRect(
+                    ref rect, 
+                    WorkplaceSaver.Native.NativeMethods.MONITOR_DEFAULTTONULL);
+                Assert.NotEqual(IntPtr.Zero, hMon);
+            }
+        }
     }
 }

@@ -26,6 +26,8 @@
 [CmdletBinding()]
 param (
     [string]$Version = "1.0.0",
+    [string]$Notes = "",
+    [string]$TargetCommit = "",
     [switch]$UploadRelease,
     [switch]$Prerelease
 )
@@ -246,33 +248,18 @@ if ($UploadRelease) {
     }
 
     $tag = "v$Version"
-    $title = "Workplace Saver v$Version - Modern Slick Redesign"
+    $title = "Workplace Saver v$Version"
 
-    $releaseNotesTemplate = @'
-# Workplace Saver v{0}
+    if ([string]::IsNullOrWhiteSpace($TargetCommit)) {
+        $TargetCommit = (git rev-parse HEAD 2>$null)
+    }
 
-Save your entire desktop workspace with a single keystroke and restore it anytime through an engineered, modern minimalist desktop dashboard.
+    if ([string]::IsNullOrWhiteSpace($Notes)) {
+        $releaseNotes = "Workplace Saver v$Version"
+    } else {
+        $releaseNotes = $Notes
+    }
 
-### Features & Highlights
-- **Engineered Tactile Minimalism:** Redesigned interface inspired by Linear, Raycast, and Vercel Geist.
-- **Obsidian Surface Ladder:** Sophisticated dark mode surfaces (#08090A -> #141518 -> #1A1B1F) with 1px hairline borders and top specular light bevels.
-- **Physical Shortcut Badges:** High-contrast keycaps for global shortcuts (Ctrl+Alt+S and Ctrl+Alt+W).
-- **Raycast-Style Quick Save Dialog:** Chiseled modal dialog with detected application preview badges and instant Enter / Esc keyboard ergonomics.
-- **Instant Restore & Multi-Monitor Clamping:** Restores all top-level window positions, states, coordinates, and multi-monitor boundaries safely.
-
----
-
-### Installation
-- **Installer (.exe):** Download and run `{1}` for automatic Start Menu and Desktop shortcuts, plus optional Windows startup integration.
-- **Portable (.zip):** Download `{2}` and extract anywhere to run without installation.
-
-### SHA-256 Checksums
-```text
-{3}  {1}
-{4}  {2}
-```
-'@
-    $releaseNotes = [string]::Format($releaseNotesTemplate, $Version, $installerName, $portableZipName, $setupHash, $zipHash)
     $notesFile = Join-Path $DistDir "release-notes.md"
     [System.IO.File]::WriteAllText($notesFile, $releaseNotes, [System.Text.Encoding]::UTF8)
 
@@ -292,6 +279,10 @@ Save your entire desktop workspace with a single keystroke and restore it anytim
             "--title", $title,
             "-F", $notesFile
         )
+
+        if (-not [string]::IsNullOrWhiteSpace($TargetCommit)) {
+            $ghArgs += @("--target", $TargetCommit)
+        }
 
         if ($Prerelease) {
             $ghArgs += "--prerelease"

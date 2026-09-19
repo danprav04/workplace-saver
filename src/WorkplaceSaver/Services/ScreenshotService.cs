@@ -17,21 +17,25 @@ namespace WorkplaceSaver.Services
                 Directory.CreateDirectory(DatabaseContext.ThumbnailsFolder);
                 string targetPath = Path.Combine(DatabaseContext.ThumbnailsFolder, $"{workspaceId}.jpg");
 
-                // Calculate virtual screen bounds (spans all monitors) using WPF SystemParameters
-                int left = (int)SystemParameters.VirtualScreenLeft;
-                int top = (int)SystemParameters.VirtualScreenTop;
-                int width = (int)SystemParameters.VirtualScreenWidth;
-                int height = (int)SystemParameters.VirtualScreenHeight;
+                // Calculate virtual screen bounds spanning all monitors using physical pixels
+                var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
+                int left = vs.Left;
+                int top = vs.Top;
+                int width = vs.Width;
+                int height = vs.Height;
 
                 if (width <= 0 || height <= 0)
                 {
-                    width = (int)SystemParameters.PrimaryScreenWidth;
-                    height = (int)SystemParameters.PrimaryScreenHeight;
-                    left = 0;
-                    top = 0;
+                    var primary = System.Windows.Forms.Screen.PrimaryScreen?.Bounds 
+                        ?? new Rectangle(0, 0, 1920, 1080);
+                    width = primary.Width;
+                    height = primary.Height;
+                    left = primary.Left;
+                    top = primary.Top;
                 }
 
                 using var screenBitmap = new Bitmap(width, height);
+
                 using (var g = Graphics.FromImage(screenBitmap))
                 {
                     g.CopyFromScreen(left, top, 0, 0, screenBitmap.Size, CopyPixelOperation.SourceCopy);

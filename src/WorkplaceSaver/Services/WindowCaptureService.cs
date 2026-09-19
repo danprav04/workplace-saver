@@ -38,11 +38,30 @@ namespace WorkplaceSaver.Services
                 if (!IsAltTabWindow(hWnd, currentPid))
                     return true; // continue enumeration
 
-                // Get placement
+                // Get placement under the target window's DPI context to prevent coordinate virtualization
                 var wp = new NativeMethods.WINDOWPLACEMENT();
                 wp.length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
-                if (!NativeMethods.GetWindowPlacement(hWnd, ref wp))
-                    return true;
+                IntPtr prevDpiContext = IntPtr.Zero;
+
+                try
+                {
+                    IntPtr winDpiContext = NativeMethods.GetWindowDpiAwarenessContext(hWnd);
+                    if (winDpiContext != IntPtr.Zero)
+                    {
+                        prevDpiContext = NativeMethods.SetThreadDpiAwarenessContext(winDpiContext);
+                    }
+
+                    if (!NativeMethods.GetWindowPlacement(hWnd, ref wp))
+                        return true;
+                }
+                finally
+                {
+                    if (prevDpiContext != IntPtr.Zero)
+                    {
+                        NativeMethods.SetThreadDpiAwarenessContext(prevDpiContext);
+                    }
+                }
+
 
                 // Title
                 int titleLength = NativeMethods.GetWindowTextLength(hWnd);

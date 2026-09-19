@@ -96,6 +96,27 @@ namespace WorkplaceSaver.Native
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool CloseHandle(IntPtr hObject);
 
+        // --- Per-Monitor DPI Awareness ---
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+        // --- Multi-Monitor Support ---
+        [DllImport("user32.dll")]
+        public static extern IntPtr MonitorFromRect(ref RECT lprc, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
         // --- Global Hotkeys ---
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -106,6 +127,10 @@ namespace WorkplaceSaver.Native
         public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         // --- Constants & Enums ---
+        public const uint MONITOR_DEFAULTTONULL = 0x00000000;
+        public const uint MONITOR_DEFAULTTOPRIMARY = 0x00000001;
+        public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
         public const int GWL_STYLE = -16;
         public const int GWL_EXSTYLE = -20;
         public const uint WS_EX_TOOLWINDOW = 0x00000080;
@@ -172,5 +197,15 @@ namespace WorkplaceSaver.Native
             public POINT ptMaxPosition;
             public RECT rcNormalPosition;
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MONITORINFO
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
     }
 }
+

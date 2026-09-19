@@ -21,17 +21,6 @@ namespace WorkplaceSaver.Services
 
             int restoredCount = 0;
 
-            // Virtual screen bounds for safety checking
-            int vLeft = (int)SystemParameters.VirtualScreenLeft;
-            int vTop = (int)SystemParameters.VirtualScreenTop;
-            int vWidth = (int)SystemParameters.VirtualScreenWidth;
-            int vHeight = (int)SystemParameters.VirtualScreenHeight;
-            int vRight = vLeft + vWidth;
-            int vBottom = vTop + vHeight;
-
-            int primaryWidth = (int)SystemParameters.PrimaryScreenWidth;
-            int primaryHeight = (int)SystemParameters.PrimaryScreenHeight;
-
             // Sort windows by Z-order (background first, foreground last)
             var orderedWindows = workspace.Windows.OrderBy(w => w.ZOrder).ToList();
             var claimedHwnds = new HashSet<IntPtr>();
@@ -51,7 +40,7 @@ namespace WorkplaceSaver.Services
                     if (hWnd != IntPtr.Zero)
                     {
                         claimedHwnds.Add(hWnd);
-                        ApplyWindowPlacement(hWnd, windowSnapshot, vLeft, vTop, vRight, vBottom, primaryWidth, primaryHeight);
+                        ApplyWindowPlacement(hWnd, windowSnapshot);
                         restoredCount++;
                     }
                 }
@@ -63,6 +52,7 @@ namespace WorkplaceSaver.Services
 
             return restoredCount;
         }
+
 
         private static IntPtr FindExistingWindow(WindowSnapshot snapshot, HashSet<IntPtr>? claimedHwnds = null)
         {
@@ -82,6 +72,22 @@ namespace WorkplaceSaver.Services
                     return true;
 
                 if (!NativeMethods.IsWindowVisible(hWnd))
+                    return true;
+
+                // Ignore cloaked windows (e.g. inactive virtual desktop or suspended UWP)
+                int cloaked = 0;
+                int hr = NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_CLOAKED, out cloaked, sizeof(int));
+                if (hr == 0 && cloaked != 0)
+                    return true;
+
+                // Ensure it is a root window or top-level popup (exclude child/helper windows)
+                IntPtr root = NativeMethods.GetAncestor(hWnd, NativeMethods.GA_ROOTOWNER);
+                if (root != IntPtr.Zero && root != hWnd && NativeMethods.GetLastActivePopup(root) != hWnd)
+                    return true;
+
+                // Exclude tool windows unless explicitly marked as app window
+                long exStyle = NativeMethods.GetWindowLongPtr(hWnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+                if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0 && (exStyle & NativeMethods.WS_EX_APPWINDOW) == 0)
                     return true;
 
                 NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
@@ -127,20 +133,36 @@ namespace WorkplaceSaver.Services
                     return true; // Never match other shell windows for explorer
                 }
 
-                // Match by title for regular apps
+                bool classMatches = string.IsNullOrEmpty(snapshot.ClassName) ||
+                                    className.Equals(snapshot.ClassName, StringComparison.OrdinalIgnoreCase);
+
+                // Exact title match (highest priority)
                 if (!string.IsNullOrEmpty(snapshot.WindowTitle) && title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase))
                 {
                     foundHwnd = hWnd;
                     return false; // stop enumeration
                 }
 
-                if (foundHwnd == IntPtr.Zero && titleLength > 0)
+                // Substring / prefix match (e.g. Antigravity chat or project title changes)
+                if (!string.IsNullOrEmpty(snapshot.WindowTitle) && classMatches &&
+                    (title.StartsWith(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                     snapshot.WindowTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase) ||
+                     title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                     snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foundHwnd = hWnd;
+                    // Keep looking in case an exact match appears later
+                }
+
+                // Fallback: match by process name and class name with non-empty title
+                if (foundHwnd == IntPtr.Zero && titleLength > 0 && classMatches)
                 {
                     foundHwnd = hWnd;
                 }
 
                 return true;
             }, IntPtr.Zero);
+
 
             return foundHwnd;
         }
@@ -339,69 +361,86 @@ namespace WorkplaceSaver.Services
             }
         }
 
-        private static void ApplyWindowPlacement(
-            IntPtr hWnd,
-            WindowSnapshot snapshot,
-            int vLeft, int vTop, int vRight, int vBottom,
-            int primaryWidth, int primaryHeight)
+        private static void ApplyWindowPlacement(IntPtr hWnd, WindowSnapshot snapshot)
         {
-            int left = snapshot.NormalLeft;
-            int top = snapshot.NormalTop;
-            int right = snapshot.NormalRight;
-            int bottom = snapshot.NormalBottom;
-            int width = Math.Max(300, right - left);
-            int height = Math.Max(200, bottom - top);
-
-            // Screen intersection safety check
-            // If the window position is completely outside virtual screen (e.g. detached secondary monitor)
-            bool isOffScreen = right <= vLeft || left >= vRight || bottom <= vTop || top >= vBottom;
-            if (isOffScreen)
+            var targetRect = new NativeMethods.RECT
             {
-                left = 50;
-                top = 50;
-                right = Math.Min(primaryWidth - 50, left + width);
-                bottom = Math.Min(primaryHeight - 50, top + height);
+                Left = snapshot.NormalLeft,
+                Top = snapshot.NormalTop,
+                Right = snapshot.NormalRight,
+                Bottom = snapshot.NormalBottom
+            };
+
+            int width = targetRect.Width > 0 ? targetRect.Width : 800;
+            int height = targetRect.Height > 0 ? targetRect.Height : 600;
+            targetRect.Right = targetRect.Left + width;
+            targetRect.Bottom = targetRect.Top + height;
+
+            // Check whether the window coordinates intersect any currently active monitor
+            IntPtr hMonitor = NativeMethods.MonitorFromRect(ref targetRect, NativeMethods.MONITOR_DEFAULTTONULL);
+            if (hMonitor == IntPtr.Zero)
+            {
+                // The window was on a disconnected or rearranged monitor; clamp to the nearest active monitor
+                IntPtr nearestMon = NativeMethods.MonitorFromRect(ref targetRect, NativeMethods.MONITOR_DEFAULTTONEAREST);
+                var mi = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+                if (NativeMethods.GetMonitorInfo(nearestMon, ref mi))
+                {
+                    int clampedWidth = Math.Min(width, Math.Max(300, mi.rcWork.Width - 100));
+                    int clampedHeight = Math.Min(height, Math.Max(200, mi.rcWork.Height - 100));
+                    targetRect.Left = mi.rcWork.Left + 50;
+                    targetRect.Top = mi.rcWork.Top + 50;
+                    targetRect.Right = targetRect.Left + clampedWidth;
+                    targetRect.Bottom = targetRect.Top + clampedHeight;
+                }
             }
 
             var wp = new NativeMethods.WINDOWPLACEMENT
             {
                 length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>(),
                 flags = snapshot.Flags,
-                showCmd = snapshot.ShowCmd == NativeMethods.SW_SHOWMINIMIZED 
-                    ? NativeMethods.SW_SHOWNORMAL // Don't hide restored windows minimized unless requested
+                showCmd = snapshot.ShowCmd == NativeMethods.SW_SHOWMINIMIZED
+                    ? NativeMethods.SW_SHOWNORMAL // Don't leave restored windows minimized unless requested
                     : snapshot.ShowCmd,
                 ptMinPosition = new NativeMethods.POINT { X = -1, Y = -1 },
                 ptMaxPosition = new NativeMethods.POINT { X = -1, Y = -1 },
-                rcNormalPosition = new NativeMethods.RECT
-                {
-                    Left = left,
-                    Top = top,
-                    Right = right,
-                    Bottom = bottom
-                }
+                rcNormalPosition = targetRect
             };
 
-            // If minimized currently, restore it first
+            // If minimized currently, restore it first so placement doesn't get ignored
             if (NativeMethods.IsIconic(hWnd))
             {
                 NativeMethods.ShowWindow(hWnd, NativeMethods.SW_RESTORE);
             }
 
-            // Apply placement
-            NativeMethods.SetWindowPlacement(hWnd, ref wp);
+            // Apply placement under the target window's DPI context to prevent coordinate virtualization
+            IntPtr prevDpiContext = IntPtr.Zero;
+            try
+            {
+                IntPtr winDpiContext = NativeMethods.GetWindowDpiAwarenessContext(hWnd);
+                if (winDpiContext != IntPtr.Zero)
+                {
+                    prevDpiContext = NativeMethods.SetThreadDpiAwarenessContext(winDpiContext);
+                }
 
-            // Position and bring to normal Z-order
+                NativeMethods.SetWindowPlacement(hWnd, ref wp);
+            }
+            finally
+            {
+                if (prevDpiContext != IntPtr.Zero)
+                {
+                    NativeMethods.SetThreadDpiAwarenessContext(prevDpiContext);
+                }
+            }
+
+            // Bring to normal Z-order and show without overriding coordinates (SWP_NOMOVE | SWP_NOSIZE)
             NativeMethods.SetWindowPos(
                 hWnd,
                 IntPtr.Zero,
-                left,
-                top,
-                width,
-                height,
-                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW
+                0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW
             );
 
-            // If it was maximized, ensure it maximizes nicely
+            // If it was captured maximized, ensure it transitions to maximized
             if (snapshot.ShowCmd == NativeMethods.SW_SHOWMAXIMIZED)
             {
                 NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOWMAXIMIZED);
