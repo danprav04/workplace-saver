@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using WorkplaceSaver.Models;
 using WorkplaceSaver.Native;
 
@@ -69,10 +70,10 @@ namespace WorkplaceSaver.Services
                 // Check for icon
                 string? iconBase64 = ScreenshotService.ExtractIconBase64(exePath);
 
-                // If Explorer window, capture its active folder path
+                // If Explorer window, capture active folder path; for other apps, resolve open document/project file
                 string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
                     ? GetExplorerFolderPath(hWnd, title) 
-                    : null;
+                    : ResolveDocumentPathFromTitle(title, processName);
 
                 var snapshot = new WindowSnapshot
                 {
@@ -280,6 +281,146 @@ namespace WorkplaceSaver.Services
             {
                 App.Log($"[WindowCapture] GetExplorerFolderPath error: {ex.Message}");
             }
+            return null;
+        }
+
+        public static string? ResolveDocumentPathFromTitle(string windowTitle, string processName)
+        {
+            if (string.IsNullOrWhiteSpace(windowTitle)) return null;
+
+            // 1. Try extracting filename from window title
+            string? candidateFileName = ExtractFileNameFromTitle(windowTitle, processName);
+            if (string.IsNullOrEmpty(candidateFileName)) return null;
+
+            // 2. Check Windows Recent shortcuts (%AppData%\Microsoft\Windows\Recent)
+            string? recentPath = ResolveFromWindowsRecent(candidateFileName);
+            if (!string.IsNullOrEmpty(recentPath) && File.Exists(recentPath))
+            {
+                App.Log($"[DocumentResolve] Resolved '{candidateFileName}' from Recent: {recentPath}");
+                return $"\"{recentPath}\"";
+            }
+
+            // 3. Check common user directories (Documents, Desktop, Downloads, Pictures)
+            string? foundPath = SearchCommonDirectoriesForFile(candidateFileName);
+            if (!string.IsNullOrEmpty(foundPath) && File.Exists(foundPath))
+            {
+                App.Log($"[DocumentResolve] Resolved '{candidateFileName}' from Search: {foundPath}");
+                return $"\"{foundPath}\"";
+            }
+
+            return null;
+        }
+
+        public static string? ExtractFileNameFromTitle(string title, string processName)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return null;
+
+            // Special regex for Photoshop: e.g. "Spider_Cover.psd @ 33.3% (Layer 1)"
+            if (processName.IndexOf("photoshop", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var psMatch = Regex.Match(title, @"^([^@\-]+?\.(?:psd|psb|tif|tiff|png|jpg|jpeg|ai|eps|raw|cr2|nef|dng))\b", RegexOptions.IgnoreCase);
+                if (psMatch.Success) return psMatch.Groups[1].Value.Trim();
+            }
+
+            // General project / document regex: matches filename with known extensions
+            var genMatch = Regex.Match(title, @"\b([\w\-. ]+\.(?:psd|psb|ai|prproj|aep|blend|docx|xlsx|pptx|pdf|txt|csv|json|xml|html|cs|cpp|c|h|py|js|ts|java|sql|md|sln))\b", RegexOptions.IgnoreCase);
+            if (genMatch.Success)
+            {
+                return genMatch.Groups[1].Value.Trim();
+            }
+
+            return null;
+        }
+
+        public static string? ResolveFromWindowsRecent(string fileName)
+        {
+            try
+            {
+                string recentDir = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
+                if (!Directory.Exists(recentDir)) return null;
+
+                Type? wshType = Type.GetTypeFromProgID("WScript.Shell");
+                if (wshType == null) return null;
+                dynamic? wsh = Activator.CreateInstance(wshType);
+                if (wsh == null) return null;
+
+                // 1. Direct match: <fileName>.lnk
+                string directLnk = Path.Combine(recentDir, $"{fileName}.lnk");
+                if (File.Exists(directLnk))
+                {
+                    dynamic sc = wsh.CreateShortcut(directLnk);
+                    string target = sc.TargetPath;
+                    if (!string.IsNullOrEmpty(target) && File.Exists(target)) return target;
+                }
+
+                // 2. Pattern match in Recent directory
+                string nameOnly = Path.GetFileNameWithoutExtension(fileName);
+                var lnkFiles = Directory.GetFiles(recentDir, $"*{nameOnly}*.lnk");
+                foreach (var lnk in lnkFiles)
+                {
+                    try
+                    {
+                        dynamic sc = wsh.CreateShortcut(lnk);
+                        string target = sc.TargetPath;
+                        if (!string.IsNullOrEmpty(target) && File.Exists(target) && 
+                            Path.GetFileName(target).Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return target;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public static string? SearchCommonDirectoriesForFile(string fileName)
+        {
+            try
+            {
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                string downloads = Path.Combine(userProfile, "Downloads");
+
+                string[] directPaths = new[]
+                {
+                    Path.Combine(userProfile, fileName),
+                    Path.Combine(docs, fileName),
+                    Path.Combine(desktop, fileName),
+                    Path.Combine(pictures, fileName),
+                    Path.Combine(downloads, fileName)
+                };
+
+                foreach (var p in directPaths)
+                {
+                    if (File.Exists(p)) return p;
+                }
+
+                string[] searchRoots = new[] { docs, desktop, pictures, userProfile };
+                foreach (var root in searchRoots)
+                {
+                    try
+                    {
+                        if (!Directory.Exists(root)) continue;
+                        var files = Directory.GetFiles(root, fileName, new EnumerationOptions
+                        {
+                            RecurseSubdirectories = true,
+                            MaxRecursionDepth = 3,
+                            IgnoreInaccessible = true
+                        });
+
+                        foreach (var f in files)
+                        {
+                            if (File.Exists(f)) return f;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
             return null;
         }
     }

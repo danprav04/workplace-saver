@@ -216,10 +216,17 @@ namespace WorkplaceSaver.Services
                 if (string.IsNullOrWhiteSpace(snapshot.ExecutablePath) || !File.Exists(snapshot.ExecutablePath))
                     return IntPtr.Zero;
 
+                // Regular application
+                string? regularArgs = snapshot.CommandLine;
+                if (string.IsNullOrWhiteSpace(regularArgs) && !string.IsNullOrWhiteSpace(snapshot.WindowTitle))
+                {
+                    regularArgs = WindowCaptureService.ResolveDocumentPathFromTitle(snapshot.WindowTitle, snapshot.ProcessName);
+                }
+
                 var regularPsi = new ProcessStartInfo
                 {
                     FileName = snapshot.ExecutablePath,
-                    Arguments = snapshot.CommandLine ?? string.Empty,
+                    Arguments = regularArgs ?? string.Empty,
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(snapshot.ExecutablePath) ?? string.Empty
                 };
