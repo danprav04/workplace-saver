@@ -15,6 +15,10 @@ publish/
 Publish/
 **/publish/
 **/Publish/
+dist/
+Dist/
+**/dist/
+**/Dist/
 [Ll]og/
 [Ll]ogs/
 TestResults/

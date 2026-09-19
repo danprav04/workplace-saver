@@ -35,6 +35,48 @@ namespace WorkplaceSaver.Tests
         }
 
         [Fact]
+        public async Task XamlViews_Instantiate_WithoutCrashing()
+        {
+            Exception? threadEx = null;
+            var tcs = new TaskCompletionSource<bool>();
+
+            var t = new System.Threading.Thread(async () =>
+            {
+                try
+                {
+                    var app = new App();
+                    app.InitializeComponent();
+
+                    var vm = new MainViewModel(_repository);
+                    var win = new WorkplaceSaver.Views.MainWindow(vm);
+                    Assert.NotNull(win);
+                    win.Show();
+                    await vm.LoadWorkspacesAsync();
+                    win.UpdateLayout();
+
+                    var preview = new Workspace { Name = "Test Preview", Windows = new() };
+                    var dlg = new WorkplaceSaver.Views.SaveWorkspaceDialog(preview);
+                    Assert.NotNull(dlg);
+                    dlg.Show();
+                    dlg.UpdateLayout();
+
+                    win.Close();
+                    dlg.Close();
+                    tcs.SetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    threadEx = ex;
+                    tcs.SetException(ex);
+                }
+            });
+            t.SetApartmentState(System.Threading.ApartmentState.STA);
+            t.Start();
+
+            await tcs.Task;
+        }
+
+        [Fact]
         public async Task Repository_SaveAndRetrieve_WorkspaceWithWindows()
         {
             var workspaceId = Guid.NewGuid().ToString();

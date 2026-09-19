@@ -1,0 +1,228 @@
+<#
+.SYNOPSIS
+    Compiles, packages, and optionally publishes the Workplace Saver installer to GitHub Releases.
+
+.DESCRIPTION
+    1. Publishes a clean Release build of Workplace Saver.
+    2. Builds the Windows setup installer (.exe) via Inno Setup 6.
+    3. Packages a standalone portable zip (.zip).
+    4. Computes SHA-256 checksums.
+    5. Optionally uploads all release assets to GitHub Releases using GitHub CLI.
+
+.PARAMETER Version
+    The version tag for the build and release (default: "1.0.0").
+
+.PARAMETER UploadRelease
+    If specified, creates a GitHub Release and uploads installer artifacts.
+
+.PARAMETER Prerelease
+    Marks the GitHub Release as a pre-release.
+
+.EXAMPLE
+    .\Create-Installer.ps1
+    .\Create-Installer.ps1 -Version "1.0.0" -UploadRelease
+#>
+
+[CmdletBinding()]
+param (
+    [string]$Version = "1.0.0",
+    [switch]$UploadRelease,
+    [switch]$Prerelease
+)
+
+$ErrorActionPreference = "Stop"
+$ScriptDir = $PSScriptRoot
+$RootDir = (Resolve-Path "$ScriptDir\..").Path
+$PublishDir = Join-Path $RootDir "publish"
+$DistDir = Join-Path $RootDir "dist"
+$IssPath = Join-Path $RootDir "installer\WorkplaceSaver.iss"
+$ProjectFile = Join-Path $RootDir "src\WorkplaceSaver\WorkplaceSaver.csproj"
+
+Write-Host "========================================================" -ForegroundColor Cyan
+Write-Host " Workplace Saver Installer & Release Builder v$Version" -ForegroundColor Cyan
+Write-Host "========================================================" -ForegroundColor Cyan
+
+# ---------------------------------------------------------------------
+# 1. Locate .NET SDK
+# ---------------------------------------------------------------------
+$dotnet = "dotnet"
+$localDotnet = "$env:LocalAppData\Microsoft\dotnet\dotnet.exe"
+if (Test-Path $localDotnet) {
+    $dotnet = $localDotnet
+}
+
+Write-Host "`n[1/5] Checking .NET SDK..." -ForegroundColor Yellow
+$sdkVersion = & $dotnet --version
+Write-Host "  Using .NET SDK: $sdkVersion ($dotnet)" -ForegroundColor Gray
+
+# ---------------------------------------------------------------------
+# 2. Locate Inno Setup Compiler (ISCC)
+# ---------------------------------------------------------------------
+Write-Host "`n[2/5] Locating Inno Setup Compiler (ISCC)..." -ForegroundColor Yellow
+$isccCandidates = @(
+    "$env:LocalAppData\Programs\Inno Setup 6\ISCC.exe",
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+
+$isccPath = $null
+foreach ($candidate in $isccCandidates) {
+    if (Test-Path $candidate) {
+        $isccPath = $candidate
+        break
+    }
+}
+
+if (-not $isccPath) {
+    $whichIscc = (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue)
+    if ($whichIscc) {
+        $isccPath = $whichIscc.Source
+    }
+}
+
+if (-not $isccPath) {
+    Write-Error "Inno Setup Compiler (ISCC.exe) was not found. Please install Inno Setup 6 (e.g. winget install JRSoftware.InnoSetup --source winget)."
+}
+Write-Host "  Using Inno Setup: $isccPath" -ForegroundColor Gray
+
+# ---------------------------------------------------------------------
+# 3. Publish Release Binary
+# ---------------------------------------------------------------------
+Write-Host "`n[3/5] Publishing Release build of Workplace Saver..." -ForegroundColor Yellow
+if (Test-Path $PublishDir) {
+    # Stop running instance if locking publish files
+    Stop-Process -Name WorkplaceSaver -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+    Remove-Item $PublishDir -Recurse -Force
+}
+
+& $dotnet publish $ProjectFile -c Release -o $PublishDir /p:Version=$Version /p:AssemblyVersion=$Version
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Dotnet publish failed with exit code $LASTEXITCODE."
+}
+Write-Host "  Release published to: $PublishDir" -ForegroundColor Green
+
+# ---------------------------------------------------------------------
+# 4. Compile Installer & Portable Zip
+# ---------------------------------------------------------------------
+Write-Host "`n[4/5] Building Installer and Portable ZIP..." -ForegroundColor Yellow
+if (-not (Test-Path $DistDir)) {
+    New-Item -ItemType Directory -Path $DistDir | Out-Null
+}
+
+$installerName = "WorkplaceSaver-Setup-v$Version.exe"
+$installerPath = Join-Path $DistDir $installerName
+$portableZipName = "WorkplaceSaver-v$Version-Portable.zip"
+$portableZipPath = Join-Path $DistDir $portableZipName
+$checksumsFile = Join-Path $DistDir "checksums.txt"
+
+# Run Inno Setup Compiler
+Write-Host "  Running Inno Setup compiler..." -ForegroundColor Gray
+& $isccPath "/DMyAppVersion=$Version" "/DSourceDir=$PublishDir" "/DOutputDir=$DistDir" $IssPath
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Inno Setup compilation failed with exit code $LASTEXITCODE."
+}
+Write-Host "  [OK] Installer created: $installerPath" -ForegroundColor Green
+
+# Create Portable Zip
+Write-Host "  Creating portable zip archive..." -ForegroundColor Gray
+if (Test-Path $portableZipPath) {
+    Remove-Item $portableZipPath -Force
+}
+Compress-Archive -Path "$PublishDir\*" -DestinationPath $portableZipPath -CompressionLevel Optimal
+Write-Host "  [OK] Portable archive created: $portableZipPath" -ForegroundColor Green
+
+# Generate Checksums
+Write-Host "  Generating SHA-256 checksums..." -ForegroundColor Gray
+$setupHash = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash
+$zipHash = (Get-FileHash -Path $portableZipPath -Algorithm SHA256).Hash
+
+$checksumLines = @(
+    "# Workplace Saver v$Version SHA-256 Checksums",
+    "$setupHash  $installerName",
+    "$zipHash  $portableZipName"
+)
+Set-Content -Path $checksumsFile -Value ($checksumLines -join "`r`n")
+Write-Host "  [OK] Checksums written to: $checksumsFile" -ForegroundColor Green
+
+Write-Host "`nArtifacts generated in '$DistDir':" -ForegroundColor Cyan
+Write-Host "  - $installerName ($([math]::Round((Get-Item $installerPath).Length / 1MB, 2)) MB)" -ForegroundColor Gray
+Write-Host "  - $portableZipName ($([math]::Round((Get-Item $portableZipPath).Length / 1MB, 2)) MB)" -ForegroundColor Gray
+Write-Host "  - checksums.txt" -ForegroundColor Gray
+
+# ---------------------------------------------------------------------
+# 5. Upload to GitHub Releases (Optional)
+# ---------------------------------------------------------------------
+if ($UploadRelease) {
+    Write-Host "`n[5/5] Uploading to GitHub Releases..." -ForegroundColor Yellow
+
+    # Ensure GH_TOKEN is available if not logged in
+    $ghAuthCheck = (& gh auth status 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  gh CLI not logged in directly. Fetching token from Git Credential Manager..." -ForegroundColor Gray
+        $gcmPath = "C:\Program Files\Git\mingw64\bin\git-credential-manager.exe"
+        if (Test-Path $gcmPath) {
+            $creds = "protocol=https`r`nhost=github.com`r`n`r`n" | & $gcmPath get
+            $tokenMatch = ($creds | Select-String "password=(.*)").Matches
+            if ($tokenMatch) {
+                $env:GH_TOKEN = $tokenMatch.Groups[1].Value.Trim()
+                Write-Host "  Authentication token loaded from Git Credential Manager." -ForegroundColor Gray
+            }
+        }
+    }
+
+    $tag = "v$Version"
+    $title = "Workplace Saver v$Version - Modern Slick Redesign"
+
+    $releaseNotesTemplate = @'
+# Workplace Saver v{0}
+
+Save your entire desktop workspace with a single keystroke and restore it anytime through an engineered, modern minimalist desktop dashboard.
+
+### Features & Highlights
+- **Engineered Tactile Minimalism:** Redesigned interface inspired by Linear, Raycast, and Vercel Geist.
+- **Obsidian Surface Ladder:** Sophisticated dark mode surfaces (#08090A -> #141518 -> #1A1B1F) with 1px hairline borders and top specular light bevels.
+- **Physical Shortcut Badges:** High-contrast keycaps for global shortcuts (Ctrl+Alt+S and Ctrl+Alt+W).
+- **Raycast-Style Quick Save Dialog:** Chiseled modal dialog with detected application preview badges and instant Enter / Esc keyboard ergonomics.
+- **Instant Restore & Multi-Monitor Clamping:** Restores all top-level window positions, states, coordinates, and multi-monitor boundaries safely.
+
+---
+
+### Installation
+- **Installer (.exe):** Download and run `{1}` for automatic Start Menu and Desktop shortcuts, plus optional Windows startup integration.
+- **Portable (.zip):** Download `{2}` and extract anywhere to run without installation.
+
+### SHA-256 Checksums
+```text
+{3}  {1}
+{4}  {2}
+```
+'@
+    $releaseNotes = [string]::Format($releaseNotesTemplate, $Version, $installerName, $portableZipName, $setupHash, $zipHash)
+
+    Write-Host "  Creating release '$tag' on GitHub..." -ForegroundColor Cyan
+    $ghArgs = @(
+        "release", "create", $tag,
+        $installerPath,
+        $portableZipPath,
+        $checksumsFile,
+        "--title", $title,
+        "--notes", $releaseNotes
+    )
+
+    if ($Prerelease) {
+        $ghArgs += "--prerelease"
+    }
+
+    & gh @ghArgs
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "`n[OK] Successfully created GitHub Release '$tag'!" -ForegroundColor Green
+    } else {
+        Write-Error "Failed to create GitHub release. Exit code: $LASTEXITCODE"
+    }
+} else {
+    Write-Host "`n[5/5] Skipping GitHub upload (-UploadRelease was not specified)." -ForegroundColor Gray
+    Write-Host "  To upload, run: .\Create-Installer.ps1 -Version '$Version' -UploadRelease" -ForegroundColor Gray
+}
+
+Write-Host "`nAll done!" -ForegroundColor Green

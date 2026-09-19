@@ -7,49 +7,58 @@
         xmlns:models="clr-namespace:WorkplaceSaver.Models"
         mc:Ignorable="d"
         Title="Workplace Saver"
-        Height="720" Width="1080"
-        MinHeight="550" MinWidth="800"
+        Height="740" Width="1100"
+        MinHeight="560" MinWidth="840"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
         d:DataContext="{d:DesignInstance vm:MainViewModel}">
 
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/Themes/Theme.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/WorkplaceSaver;component/Themes/Theme.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Window.Resources>
 
-    <!-- Outer Window Container with Drop Shadow -->
-    <Border Background="{StaticResource BgBrush}"
-            BorderBrush="{StaticResource BorderBrush}"
+    <!-- Outer Window Container with Deep Ambient Shadow & Specular Bevel -->
+    <Border Background="{StaticResource CanvasBaseBrush}"
+            BorderBrush="{StaticResource BorderHairlineBrush}"
             BorderThickness="1"
             CornerRadius="14"
-            Margin="10">
+            Margin="12"
+            SnapsToDevicePixels="True">
         <Border.Effect>
-            <DropShadowEffect Color="#000000" BlurRadius="24" Opacity="0.5" ShadowDepth="4" Direction="270"/>
+            <DropShadowEffect Color="#000000" BlurRadius="32" Opacity="0.7" ShadowDepth="6" Direction="270"/>
         </Border.Effect>
 
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" /> <!-- Window Chrome / Title Bar -->
-                <RowDefinition Height="Auto" /> <!-- Action & Search Bar -->
-                <RowDefinition Height="Auto" /> <!-- Status Banner -->
-                <RowDefinition Height="*" />    <!-- Main Content (Cards / Empty state) -->
-                <RowDefinition Height="Auto" /> <!-- Footer -->
+                <RowDefinition Height="Auto" /> <!-- 0: Sleek Header / Title Bar -->
+                <RowDefinition Height="Auto" /> <!-- 1: Command & Search Bar -->
+                <RowDefinition Height="Auto" /> <!-- 2: Status Banner -->
+                <RowDefinition Height="*" />    <!-- 3: Main Canvas (Workspaces / Empty State) -->
+                <RowDefinition Height="Auto" /> <!-- 4: Status / Hotkey Footer -->
             </Grid.RowDefinitions>
 
-            <!-- 1. Window Chrome / Title Bar (Draggable) -->
+            <!-- Inset top specular highlight for root window -->
+            <Border Grid.Row="0" VerticalAlignment="Top" Height="1" Margin="14,0,14,0" Background="{StaticResource SpecularBorderGradient}" Panel.ZIndex="100"/>
+
+            <!-- ================================================================= -->
+            <!-- 0. SLEEK HEADER / TITLE BAR (Draggable)                           -->
+            <!-- ================================================================= -->
             <Border Grid.Row="0"
                     Background="{StaticResource HeaderGradient}"
-                    CornerRadius="14,14,0,0"
-                    BorderBrush="{StaticResource BorderBrush}"
+                    CornerRadius="13,13,0,0"
+                    BorderBrush="{StaticResource BorderHairlineBrush}"
                     BorderThickness="0,0,0,1"
-                    Padding="16,12"
-                    MouseDown="OnTitleBarMouseDown">
+                    Padding="18,12"
+                    MouseDown="OnTitleBarMouseDown"
+                    SnapsToDevicePixels="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -58,66 +67,114 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- App Brand -->
+                    <!-- App Brand Identity -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Background="{StaticResource PrimaryAccentGradient}"
-                                CornerRadius="8" Width="30" Height="30" Margin="0,0,10,0">
-                            <TextBlock Text="⚡" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <!-- Icon glyph with specular glow -->
+                        <Border Width="28" Height="28"
+                                Background="{StaticResource PrimaryAccentGradient}"
+                                CornerRadius="7"
+                                Margin="0,0,10,0"
+                                SnapsToDevicePixels="True">
+                            <TextBlock Text="⚡" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
+
                         <TextBlock Text="Workplace"
                                    FontFamily="{StaticResource AppFont}"
-                                   FontSize="16"
-                                   FontWeight="Bold"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
                                    Foreground="{StaticResource TextPrimaryBrush}"
                                    VerticalAlignment="Center" />
                         <TextBlock Text=" Saver"
                                    FontFamily="{StaticResource AppFont}"
-                                   FontSize="16"
-                                   FontWeight="Bold"
-                                   Foreground="#38BDF8"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource AccentIndigoBrush}"
                                    VerticalAlignment="Center" />
-                        <Border Background="#21262D" CornerRadius="6" Padding="6,2" Margin="10,0,0,0">
-                            <TextBlock Text="v1.0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontWeight="SemiBold"/>
+
+                        <!-- Version pill -->
+                        <Border Background="#18191E"
+                                BorderBrush="{StaticResource BorderHairlineBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="5,1"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="v1.0"
+                                       FontFamily="{StaticResource CodeFont}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="10"
+                                       FontWeight="Medium"/>
                         </Border>
                     </StackPanel>
 
-                    <!-- Hotkey Badges in Title Bar -->
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
-                        <Border Background="#161B22" BorderBrush="#30363D" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,8,0">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Ctrl+Alt+S" Foreground="#38BDF8" FontSize="11" FontWeight="Bold" FontFamily="Consolas"/>
-                                <TextBlock Text=" Quick Save" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <!-- Tactile Hotkey Badges in Header -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,20,0">
+                        <!-- Quick Save Badge -->
+                        <Border Background="#121316"
+                                BorderBrush="{StaticResource BorderHairlineBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="8,3"
+                                Margin="0,0,8,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Ctrl+Alt+S"
+                                           FontFamily="{StaticResource CodeFont}"
+                                           Foreground="{StaticResource AccentCyanBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="Save"
+                                           FontFamily="{StaticResource AppFont}"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           FontSize="11"
+                                           Margin="5,0,0,0"/>
                             </StackPanel>
                         </Border>
-                        <Border Background="#161B22" BorderBrush="#30363D" BorderThickness="1" CornerRadius="6" Padding="8,4">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Ctrl+Alt+W" Foreground="#A78BFA" FontSize="11" FontWeight="Bold" FontFamily="Consolas"/>
-                                <TextBlock Text=" Open Manager" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="4,0,0,0"/>
+
+                        <!-- Open Manager Badge -->
+                        <Border Background="#121316"
+                                BorderBrush="{StaticResource BorderHairlineBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="8,3">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Ctrl+Alt+W"
+                                           FontFamily="{StaticResource CodeFont}"
+                                           Foreground="{StaticResource AccentIndigoBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="Manager"
+                                           FontFamily="{StaticResource AppFont}"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           FontSize="11"
+                                           Margin="5,0,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
-                    <!-- Window Controls (Minimize / Close to Tray) -->
+                    <!-- Window Control Buttons (Minimize / Close to Tray) -->
                     <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Style="{StaticResource SecondaryButtonStyle}"
+                        <Button Style="{StaticResource WindowChromeButtonStyle}"
                                 Content="—"
-                                Width="34" Height="30"
-                                Padding="0"
-                                Margin="0,0,6,0"
+                                Margin="0,0,4,0"
                                 Click="OnMinimizeClick"
-                                ToolTip="Minimize" />
-                        <Button Style="{StaticResource DangerButtonStyle}"
+                                ToolTip="Minimize window" />
+                        <Button Style="{StaticResource WindowChromeButtonStyle}"
                                 Content="✕"
-                                Width="34" Height="30"
-                                Padding="0"
                                 Click="OnCloseClick"
-                                ToolTip="Minimize to System Tray" />
+                                ToolTip="Close (minimizes to system tray)" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- 2. Controls & Search Bar -->
-            <Border Grid.Row="1" Background="#11151C" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,14">
+            <!-- ================================================================= -->
+            <!-- 1. ACTION & SEARCH TOOLBAR                                        -->
+            <!-- ================================================================= -->
+            <Border Grid.Row="1"
+                    Background="#0B0C0E"
+                    BorderBrush="{StaticResource BorderHairlineBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="20,12"
+                    SnapsToDevicePixels="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -125,21 +182,21 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Search Input -->
+                    <!-- Command-style Search Input -->
                     <TextBox Grid.Column="0"
                              Style="{StaticResource ModernSearchBoxStyle}"
                              Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
-                             Margin="0,0,14,0"
-                             Height="40" />
+                             Margin="0,0,12,0"
+                             Height="38" />
 
                     <!-- Sort Selection Dropdown -->
                     <ComboBox Grid.Column="1"
                               Style="{StaticResource ModernComboBoxStyle}"
                               SelectedValuePath="Tag"
                               SelectedValue="{Binding SelectedSort}"
-                              Width="180"
-                              Height="40"
-                              Margin="0,0,14,0">
+                              Width="175"
+                              Height="38"
+                              Margin="0,0,12,0">
                         <ComboBoxItem Content="🕒 Newest First" Tag="date_desc" IsSelected="True"/>
                         <ComboBoxItem Content="📅 Oldest First" Tag="date_asc"/>
                         <ComboBoxItem Content="🔤 Name (A → Z)" Tag="name_asc"/>
@@ -147,83 +204,101 @@
                         <ComboBoxItem Content="📦 Most Apps" Tag="apps_desc"/>
                     </ComboBox>
 
-                    <!-- Capture Button -->
+                    <!-- Tactile Capture Workspace Button -->
                     <Button Grid.Column="2"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Command="{Binding CaptureCommand}"
-                            Height="40"
-                            Padding="18,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="📸" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Capture Current Workspace" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            Height="38"
+                            Padding="16,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📸" FontSize="13" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Capture Workspace" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                 </Grid>
             </Border>
 
-            <!-- 3. Status Notification Banner -->
+            <!-- ================================================================= -->
+            <!-- 2. STATUS NOTIFICATION BANNER                                     -->
+            <!-- ================================================================= -->
             <Border Grid.Row="2"
-                    Background="#1E293B"
-                    BorderBrush="#38BDF8"
+                    Background="#111624"
+                    BorderBrush="{StaticResource BorderHairlineBrush}"
                     BorderThickness="0,0,0,1"
                     Padding="16,8"
                     Visibility="{Binding IsStatusVisible, Converter={StaticResource BoolToVisConverter}}">
-                <Grid>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock Text="✨" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding StatusMessage}"
-                                   Foreground="#F0F6FC"
-                                   FontWeight="Medium"
-                                   FontSize="12"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border Width="6" Height="6" CornerRadius="3" Background="{StaticResource AccentIndigoBrush}" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#5E6AD2" BlurRadius="6" Opacity="0.8" ShadowDepth="0"/>
+                        </Border.Effect>
+                    </Border>
+                    <TextBlock Text="{Binding StatusMessage}"
+                               FontFamily="{StaticResource AppFont}"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontWeight="Medium"
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
             </Border>
 
-            <!-- 4. Main Content (Workspaces Grid or Empty State) -->
-            <Grid Grid.Row="3">
-                <!-- Empty State -->
+            <!-- ================================================================= -->
+            <!-- 3. MAIN CANVAS (Cards Grid / Empty State)                         -->
+            <!-- ================================================================= -->
+            <Grid Grid.Row="3" Background="{StaticResource CanvasBaseBrush}">
+                <!-- Empty State (Clean Engineered Minimalism) -->
                 <StackPanel VerticalAlignment="Center"
                             HorizontalAlignment="Center"
                             Visibility="{Binding HasWorkspaces, Converter={StaticResource InverseBoolToVisConverter}}"
-                            Margin="32">
-                    <Border Background="#161B22"
-                            BorderBrush="#30363D"
-                            BorderThickness="1"
-                            CornerRadius="24"
-                            Width="88" Height="88"
-                            HorizontalAlignment="Center"
-                            Margin="0,0,0,20">
-                        <TextBlock Text="🖥️" FontSize="42" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                            Margin="40">
+                    <!-- Subtle Glowing Icon Halo -->
+                    <Grid HorizontalAlignment="Center" Margin="0,0,0,20">
+                        <Border Width="76" Height="76"
+                                CornerRadius="20"
+                                Background="#141518"
+                                BorderBrush="{StaticResource BorderHairlineBrush}"
+                                BorderThickness="1"
+                                SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#000000" BlurRadius="20" Opacity="0.4" ShadowDepth="3" Direction="270"/>
+                            </Border.Effect>
+                            <TextBlock Text="🖥️" FontSize="34" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
+
                     <TextBlock Text="No Saved Workspaces Yet"
                                FontFamily="{StaticResource AppFont}"
-                               FontSize="20"
-                               FontWeight="Bold"
+                               FontSize="18"
+                               FontWeight="SemiBold"
                                Foreground="{StaticResource TextPrimaryBrush}"
                                HorizontalAlignment="Center"
-                               Margin="0,0,0,8"/>
-                    <TextBlock Text="Capture your current open windows and arrangements to restore them anytime."
+                               Margin="0,0,0,6"/>
+                    <TextBlock Text="Capture your current desktop arrangement of windows, states, and coordinates to instantly restore them anytime."
+                               FontFamily="{StaticResource AppFont}"
                                Foreground="{StaticResource TextSecondaryBrush}"
                                FontSize="13"
                                HorizontalAlignment="Center"
                                Margin="0,0,0,20"
                                MaxWidth="420"
-                               TextAlignment="Center"/>
+                               TextAlignment="Center"
+                               LineHeight="19"/>
                     <Button Style="{StaticResource PrimaryButtonStyle}"
                             Command="{Binding CaptureCommand}"
                             HorizontalAlignment="Center"
-                            Padding="20,10">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="📸 Capture Workspace (Ctrl+Alt+S)" FontWeight="SemiBold"/>
+                            Padding="18,10">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📸 Capture Workspace" FontWeight="SemiBold" FontSize="13"/>
+                            <Border Background="#20FFFFFF" CornerRadius="3" Padding="4,1" Margin="8,0,0,0">
+                                <TextBlock Text="Ctrl+Alt+S" FontFamily="{StaticResource CodeFont}" FontSize="10" Foreground="#FFFFFF"/>
+                            </Border>
                         </StackPanel>
                     </Button>
                 </StackPanel>
 
-                <!-- Cards List -->
+                <!-- Cards Grid -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
-                              Padding="20,16"
+                              Padding="16,14"
                               Visibility="{Binding HasWorkspaces, Converter={StaticResource BoolToVisConverter}}">
                     <ItemsControl ItemsSource="{Binding Workspaces}">
                         <ItemsControl.ItemsPanel>
@@ -233,93 +308,105 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type models:Workspace}">
-                                <!-- Workspace Card -->
-                                <Border Width="320"
-                                        Height="310"
-                                        Margin="10"
-                                        Background="{StaticResource CardBgBrush}"
-                                        BorderBrush="{StaticResource BorderBrush}"
+                                <!-- High-Density Tactile Workspace Card -->
+                                <Border Width="330"
+                                        Height="315"
+                                        Margin="8"
+                                        Background="{StaticResource SurfaceCardBrush}"
+                                        BorderBrush="{StaticResource BorderHairlineBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="12"
+                                        CornerRadius="10"
                                         SnapsToDevicePixels="True">
                                     <Border.Effect>
-                                        <DropShadowEffect Color="#000000" BlurRadius="12" Opacity="0.35" Direction="270" ShadowDepth="3"/>
+                                        <DropShadowEffect Color="#000000" BlurRadius="16" Opacity="0.45" Direction="270" ShadowDepth="3"/>
                                     </Border.Effect>
+
                                     <Grid>
                                         <Grid.RowDefinitions>
-                                            <RowDefinition Height="130" /> <!-- Screenshot Thumbnail -->
-                                            <RowDefinition Height="*" />   <!-- Info & Details -->
-                                            <RowDefinition Height="Auto" /><!-- Actions -->
+                                            <RowDefinition Height="135" /> <!-- Screenshot Header -->
+                                            <RowDefinition Height="*" />   <!-- Metadata & Content -->
+                                            <RowDefinition Height="Auto" /><!-- Actions Footer -->
                                         </Grid.RowDefinitions>
 
-                                        <!-- Card Screenshot Header -->
-                                        <Border Grid.Row="0" CornerRadius="11,11,0,0" ClipToBounds="True" Background="#0D1117">
+                                        <!-- Top Specular Highlight Edge -->
+                                        <Border Grid.Row="0" VerticalAlignment="Top" Height="1" Margin="10,0,10,0" Background="{StaticResource SpecularBorderGradient}" Panel.ZIndex="10"/>
+
+                                        <!-- Card Screenshot Header with Seamless Fade -->
+                                        <Border Grid.Row="0" CornerRadius="9,9,0,0" ClipToBounds="True" Background="#060708">
                                             <Grid>
-                                                <!-- Image -->
+                                                <!-- Desktop Preview Image -->
                                                 <Image Source="{Binding ThumbnailPath, Converter={StaticResource FilePathToImageConverter}}"
                                                        Stretch="UniformToFill"
                                                        RenderOptions.BitmapScalingMode="HighQuality" />
-                                                <!-- Gradient Overlay -->
+
+                                                <!-- Dark Surface Blend Gradient -->
                                                 <Border>
                                                     <Border.Background>
                                                         <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                            <GradientStop Color="#22000000" Offset="0"/>
-                                                            <GradientStop Color="#99161B22" Offset="0.8"/>
-                                                            <GradientStop Color="#FF161B22" Offset="1"/>
+                                                            <GradientStop Color="#00000000" Offset="0"/>
+                                                            <GradientStop Color="#80141518" Offset="0.7"/>
+                                                            <GradientStop Color="#FF141518" Offset="1"/>
                                                         </LinearGradientBrush>
                                                     </Border.Background>
                                                 </Border>
 
-                                                <!-- App Count Badge Top-Right -->
+                                                <!-- Relative Time Badge (Top-Left) -->
+                                                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                        Margin="10"
+                                                        Background="#D908090A"
+                                                        BorderBrush="{StaticResource BorderHairlineBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="5"
+                                                        Padding="7,3"
+                                                        SnapsToDevicePixels="True">
+                                                    <TextBlock Text="{Binding RelativeTime}"
+                                                               FontFamily="{StaticResource AppFont}"
+                                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Medium"/>
+                                                </Border>
+
+                                                <!-- Window Count Badge (Top-Right) -->
                                                 <Border HorizontalAlignment="Right" VerticalAlignment="Top"
                                                         Margin="10"
-                                                        Background="#B30D1117"
-                                                        BorderBrush="#4058A6FF"
+                                                        Background="#E608090A"
+                                                        BorderBrush="{StaticResource BadgeCyanBorderBrush}"
                                                         BorderThickness="1"
-                                                        CornerRadius="6"
-                                                        Padding="8,4">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="🪟 " FontSize="10" Foreground="#38BDF8"/>
+                                                        CornerRadius="5"
+                                                        Padding="7,3"
+                                                        SnapsToDevicePixels="True">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="🪟 " FontSize="9" Foreground="{StaticResource AccentCyanBrush}"/>
                                                         <TextBlock Text="{Binding WindowCountSummary}"
+                                                                   FontFamily="{StaticResource AppFont}"
                                                                    Foreground="{StaticResource TextPrimaryBrush}"
                                                                    FontSize="11"
                                                                    FontWeight="SemiBold"/>
                                                     </StackPanel>
                                                 </Border>
-
-                                                <!-- Relative Time Badge Top-Left -->
-                                                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
-                                                        Margin="10"
-                                                        Background="#B30D1117"
-                                                        CornerRadius="6"
-                                                        Padding="8,4">
-                                                    <TextBlock Text="{Binding RelativeTime}"
-                                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                                               FontSize="10"
-                                                               FontWeight="Medium"/>
-                                                </Border>
                                             </Grid>
                                         </Border>
 
-                                        <!-- Card Body -->
-                                        <StackPanel Grid.Row="1" Margin="14,10,14,8">
+                                        <!-- Card Details Body -->
+                                        <StackPanel Grid.Row="1" Margin="14,8,14,8">
                                             <!-- Workspace Title -->
                                             <TextBlock Text="{Binding Name}"
                                                        FontFamily="{StaticResource AppFont}"
-                                                       FontSize="15"
-                                                       FontWeight="Bold"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
                                                        Foreground="{StaticResource TextPrimaryBrush}"
                                                        TextTrimming="CharacterEllipsis"
                                                        ToolTip="{Binding Name}"
-                                                       Margin="0,0,0,3"/>
+                                                       Margin="0,0,0,2"/>
 
-                                            <!-- Created date -->
+                                            <!-- Created Date (Muted tabular) -->
                                             <TextBlock Text="{Binding CreatedAtFormatted}"
+                                                       FontFamily="{StaticResource AppFont}"
                                                        Foreground="{StaticResource TextMutedBrush}"
                                                        FontSize="11"
                                                        Margin="0,0,0,8"/>
 
-                                            <!-- Mini App Icons Row -->
+                                            <!-- App Icons Badges Row -->
                                             <ItemsControl ItemsSource="{Binding DistinctAppIcons}">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
@@ -328,15 +415,16 @@
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border Background="#21262D"
-                                                                BorderBrush="#30363D"
+                                                        <Border Background="{StaticResource SurfaceRaisedBrush}"
+                                                                BorderBrush="{StaticResource BorderHairlineBrush}"
                                                                 BorderThickness="1"
                                                                 CornerRadius="6"
                                                                 Width="24" Height="24"
                                                                 Margin="0,0,5,0"
-                                                                ToolTip="{Binding DisplayName}">
+                                                                ToolTip="{Binding DisplayName}"
+                                                                SnapsToDevicePixels="True">
                                                             <Image Source="{Binding AppIconBase64, Converter={StaticResource Base64ToImageConverter}}"
-                                                                   Width="16" Height="16"
+                                                                   Width="15" Height="15"
                                                                    HorizontalAlignment="Center"
                                                                    VerticalAlignment="Center"/>
                                                         </Border>
@@ -344,7 +432,7 @@
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
 
-                                            <!-- Tags chips if present -->
+                                            <!-- Tag Chips (if present) -->
                                             <ItemsControl ItemsSource="{Binding TagList}" Margin="0,8,0,0">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
@@ -353,13 +441,15 @@
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border Background="#1C2128"
-                                                                BorderBrush="#30363D"
+                                                        <Border Background="#16171B"
+                                                                BorderBrush="{StaticResource BorderHairlineBrush}"
                                                                 BorderThickness="1"
                                                                 CornerRadius="4"
-                                                                Padding="5,2"
-                                                                Margin="0,0,4,4">
+                                                                Padding="6,2"
+                                                                Margin="0,0,4,4"
+                                                                SnapsToDevicePixels="True">
                                                             <TextBlock Text="{Binding}"
+                                                                       FontFamily="{StaticResource AppFont}"
                                                                        Foreground="{StaticResource TextSecondaryBrush}"
                                                                        FontSize="10"/>
                                                         </Border>
@@ -370,7 +460,7 @@
 
                                         <!-- Card Actions Footer -->
                                         <Border Grid.Row="2"
-                                                BorderBrush="{StaticResource BorderBrush}"
+                                                BorderBrush="{StaticResource BorderHairlineBrush}"
                                                 BorderThickness="0,1,0,0"
                                                 Padding="12,8">
                                             <Grid>
@@ -379,23 +469,25 @@
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
 
-                                                <!-- Open / Restore Button -->
+                                                <!-- Open Workspace Button -->
                                                 <Button Grid.Column="0"
                                                         Style="{StaticResource PrimaryButtonStyle}"
-                                                        Padding="12,7"
+                                                        Padding="12,6"
+                                                        Height="32"
                                                         Command="{Binding DataContext.RestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         CommandParameter="{Binding}"
                                                         Margin="0,0,8,0">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="▶ " FontSize="11" Margin="0,0,4,0"/>
-                                                        <TextBlock Text="Open Workspace" FontSize="12" FontWeight="SemiBold"/>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="▶ " FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="Open Workspace" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                     </StackPanel>
                                                 </Button>
 
                                                 <!-- Delete Button -->
                                                 <Button Grid.Column="1"
                                                         Style="{StaticResource DangerButtonStyle}"
-                                                        Padding="8,7"
+                                                        Padding="8,4"
+                                                        Height="32"
                                                         Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         CommandParameter="{Binding}"
                                                         ToolTip="Delete this saved workspace">
@@ -411,13 +503,16 @@
                 </ScrollViewer>
             </Grid>
 
-            <!-- 5. Status / Info Footer -->
+            <!-- ================================================================= -->
+            <!-- 4. STATUS / HOTKEY FOOTER                                         -->
+            <!-- ================================================================= -->
             <Border Grid.Row="4"
-                    Background="#11151C"
-                    BorderBrush="{StaticResource BorderBrush}"
+                    Background="{StaticResource HeaderGradient}"
+                    BorderBrush="{StaticResource BorderHairlineBrush}"
                     BorderThickness="0,1,0,0"
-                    CornerRadius="0,0,14,14"
-                    Padding="16,10">
+                    CornerRadius="0,0,13,13"
+                    Padding="18,10"
+                    SnapsToDevicePixels="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -425,16 +520,49 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Background="#10B981" CornerRadius="4" Width="8" Height="8" Margin="0,0,8,0"/>
-                        <TextBlock Text="Service Active · Press " Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
-                        <TextBlock Text="Ctrl+Alt+S" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11"/>
-                        <TextBlock Text=" to save workspace · " Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
-                        <TextBlock Text="Ctrl+Alt+W" Foreground="#A78BFA" FontWeight="SemiBold" FontSize="11"/>
-                        <TextBlock Text=" to open manager" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
+                        <!-- Active Status Dot with Ambient Glow -->
+                        <Border Background="{StaticResource AccentGreenBrush}"
+                                CornerRadius="3"
+                                Width="6" Height="6"
+                                Margin="0,0,8,0"
+                                VerticalAlignment="Center">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#10B981" BlurRadius="6" Opacity="0.8" ShadowDepth="0"/>
+                            </Border.Effect>
+                        </Border>
+
+                        <TextBlock Text="Service Active"
+                                   FontFamily="{StaticResource AppFont}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="11"
+                                   FontWeight="Medium"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text=" · Press "
+                                   FontFamily="{StaticResource AppFont}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"/>
+                        <Border Background="#16171B" BorderBrush="{StaticResource BorderHairlineBrush}" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="2,0">
+                            <TextBlock Text="Ctrl+Alt+S" FontFamily="{StaticResource CodeFont}" Foreground="{StaticResource AccentCyanBrush}" FontSize="10" FontWeight="SemiBold"/>
+                        </Border>
+                        <TextBlock Text=" to save · "
+                                   FontFamily="{StaticResource AppFont}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"/>
+                        <Border Background="#16171B" BorderBrush="{StaticResource BorderHairlineBrush}" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="2,0">
+                            <TextBlock Text="Ctrl+Alt+W" FontFamily="{StaticResource CodeFont}" Foreground="{StaticResource AccentIndigoBrush}" FontSize="10" FontWeight="SemiBold"/>
+                        </Border>
+                        <TextBlock Text=" to open manager"
+                                   FontFamily="{StaticResource AppFont}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <TextBlock Grid.Column="1"
-                               Text="Workplace Saver minimizes to the System Tray"
+                               Text="Minimizes to System Tray"
+                               FontFamily="{StaticResource AppFont}"
                                Foreground="{StaticResource TextMutedBrush}"
                                FontSize="11"
                                VerticalAlignment="Center"/>
