@@ -19,6 +19,12 @@ dist/
 Dist/
 **/dist/
 **/Dist/
+installer/
+Installer/
+**/installer/
+**/Installer/
+*.iss
+*.exe
 [Ll]og/
 [Ll]ogs/
 TestResults/

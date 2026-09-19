@@ -35,7 +35,8 @@ $ScriptDir = $PSScriptRoot
 $RootDir = (Resolve-Path "$ScriptDir\..").Path
 $PublishDir = Join-Path $RootDir "publish"
 $DistDir = Join-Path $RootDir "dist"
-$IssPath = Join-Path $RootDir "installer\WorkplaceSaver.iss"
+$AppIcon = Join-Path $RootDir "src\WorkplaceSaver\Assets\app.ico"
+$IssPath = Join-Path $DistDir "WorkplaceSaver.iss"
 $ProjectFile = Join-Path $RootDir "src\WorkplaceSaver\WorkplaceSaver.csproj"
 
 Write-Host "========================================================" -ForegroundColor Cyan
@@ -116,12 +117,81 @@ $portableZipName = "WorkplaceSaver-v$Version-Portable.zip"
 $portableZipPath = Join-Path $DistDir $portableZipName
 $checksumsFile = Join-Path $DistDir "checksums.txt"
 
+# Generate dynamic Inno Setup script in dist directory
+Write-Host "  Generating Inno Setup script dynamically..." -ForegroundColor Gray
+$issTemplate = @'
+#define MyAppVersion "__VERSION__"
+#define MyAppName "Workplace Saver"
+#define MyAppPublisher "Daniel Pravutiner"
+#define MyAppURL "https://github.com/danprav04/workplace-saver"
+#define MyAppExeName "WorkplaceSaver.exe"
+#define SourceDir "__SOURCEDIR__"
+#define OutputDir "__OUTPUTDIR__"
+#define IconFile "__ICONFILE__"
+
+[Setup]
+AppId={{E1D4A0B7-3475-4309-80EF-6B64883A3870}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} v{#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}/issues
+AppUpdatesURL={#MyAppURL}/releases
+
+DefaultDirName={autopf}\WorkplaceSaver
+DefaultGroupName={#MyAppName}
+AllowNoIcons=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+
+OutputDir={#OutputDir}
+OutputBaseFilename=WorkplaceSaver-Setup-v{#MyAppVersion}
+SetupIconFile={#IconFile}
+UninstallDisplayIcon={app}\Assets\app.ico
+
+Compression=lzma2/ultra64
+SolidCompression=yes
+WizardStyle=modern
+DisableProgramGroupPage=auto
+CloseApplications=yes
+RestartApplications=no
+
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "autostart"; Description: "Automatically start Workplace Saver in background on Windows startup"; GroupDescription: "System Integration:"; Flags: unchecked
+
+[Files]
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\app.ico"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\app.ico"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WorkplaceSaver"; ValueData: """{app}\{#MyAppExeName}"" --startup"; Tasks: autostart; Flags: uninsdeletevalue
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+'@
+
+$issContent = $issTemplate.Replace("__VERSION__", $Version).Replace("__SOURCEDIR__", $PublishDir).Replace("__OUTPUTDIR__", $DistDir).Replace("__ICONFILE__", $AppIcon)
+[System.IO.File]::WriteAllText($IssPath, $issContent, [System.Text.Encoding]::UTF8)
+
 # Run Inno Setup Compiler
 Write-Host "  Running Inno Setup compiler..." -ForegroundColor Gray
-& $isccPath "/DMyAppVersion=$Version" "/DSourceDir=$PublishDir" "/DOutputDir=$DistDir" $IssPath
+& $isccPath $IssPath
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
+Remove-Item $IssPath -Force -ErrorAction SilentlyContinue
 Write-Host "  [OK] Installer created: $installerPath" -ForegroundColor Green
 
 # Create Portable Zip
