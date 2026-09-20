@@ -35,86 +35,93 @@ namespace WorkplaceSaver.Services
 
             NativeMethods.EnumWindows((hWnd, lParam) =>
             {
-                if (!IsAltTabWindow(hWnd, currentPid))
-                    return true; // continue enumeration
-
-                // Get placement under the target window's DPI context to prevent coordinate virtualization
-                var wp = new NativeMethods.WINDOWPLACEMENT();
-                wp.length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
-                IntPtr prevDpiContext = IntPtr.Zero;
-
                 try
                 {
-                    IntPtr winDpiContext = NativeMethods.GetWindowDpiAwarenessContext(hWnd);
-                    if (winDpiContext != IntPtr.Zero)
+                    if (!IsAltTabWindow(hWnd, currentPid))
+                        return true; // continue enumeration
+
+                    // Get placement under the target window's DPI context to prevent coordinate virtualization
+                    var wp = new NativeMethods.WINDOWPLACEMENT();
+                    wp.length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
+                    IntPtr prevDpiContext = IntPtr.Zero;
+
+                    try
                     {
-                        prevDpiContext = NativeMethods.SetThreadDpiAwarenessContext(winDpiContext);
+                        IntPtr winDpiContext = NativeMethods.GetWindowDpiAwarenessContext(hWnd);
+                        if (winDpiContext != IntPtr.Zero)
+                        {
+                            prevDpiContext = NativeMethods.SetThreadDpiAwarenessContext(winDpiContext);
+                        }
+
+                        if (!NativeMethods.GetWindowPlacement(hWnd, ref wp))
+                            return true;
+                    }
+                    finally
+                    {
+                        if (prevDpiContext != IntPtr.Zero)
+                        {
+                            NativeMethods.SetThreadDpiAwarenessContext(prevDpiContext);
+                        }
                     }
 
-                    if (!NativeMethods.GetWindowPlacement(hWnd, ref wp))
+                    // Title
+                    int titleLength = NativeMethods.GetWindowTextLength(hWnd);
+                    var sbTitle = new StringBuilder(titleLength + 1);
+                    NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
+                    string title = sbTitle.ToString().Trim();
+
+                    // Class name
+                    var sbClass = new StringBuilder(256);
+                    NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
+                    string className = sbClass.ToString();
+
+                    // Process info
+                    NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+                    if (pid == currentPid || pid == 0)
                         return true;
-                }
-                finally
-                {
-                    if (prevDpiContext != IntPtr.Zero)
+
+                    string processName = GetProcessName(pid);
+                    string? exePath = GetProcessPath(pid);
+
+                    // If exePath couldn't be resolved, skip
+                    if (string.IsNullOrEmpty(exePath))
+                        return true;
+
+                    // Check for icon
+                    string? iconBase64 = ScreenshotService.ExtractIconBase64(exePath);
+
+                    // If Explorer window, capture active folder path; for other apps, resolve open document/project file
+                    string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
+                        ? GetExplorerFolderPath(hWnd, title) 
+                        : ResolveDocumentPathFromTitle(title, processName);
+
+                    var snapshot = new WindowSnapshot
                     {
-                        NativeMethods.SetThreadDpiAwarenessContext(prevDpiContext);
-                    }
+                        Id = Guid.NewGuid().ToString(),
+                        WorkspaceId = workspaceId,
+                        ProcessName = processName,
+                        ExecutablePath = exePath,
+                        CommandLine = commandLine,
+                        WindowTitle = title,
+                        ClassName = className,
+                        ShowCmd = wp.showCmd,
+                        Flags = wp.flags,
+                        NormalLeft = wp.rcNormalPosition.Left,
+                        NormalTop = wp.rcNormalPosition.Top,
+                        NormalRight = wp.rcNormalPosition.Right,
+                        NormalBottom = wp.rcNormalPosition.Bottom,
+                        ZOrder = zOrder++,
+                        AppIconBase64 = iconBase64
+                    };
+
+                    snapshots.Add(snapshot);
+                    return true;
                 }
-
-
-                // Title
-                int titleLength = NativeMethods.GetWindowTextLength(hWnd);
-                var sbTitle = new StringBuilder(titleLength + 1);
-                NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
-                string title = sbTitle.ToString().Trim();
-
-                // Class name
-                var sbClass = new StringBuilder(256);
-                NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
-                string className = sbClass.ToString();
-
-                // Process info
-                NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid == currentPid || pid == 0)
-                    return true;
-
-                string processName = GetProcessName(pid);
-                string? exePath = GetProcessPath(pid);
-
-                // If exePath couldn't be resolved, skip
-                if (string.IsNullOrEmpty(exePath))
-                    return true;
-
-                // Check for icon
-                string? iconBase64 = ScreenshotService.ExtractIconBase64(exePath);
-
-                // If Explorer window, capture active folder path; for other apps, resolve open document/project file
-                string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
-                    ? GetExplorerFolderPath(hWnd, title) 
-                    : ResolveDocumentPathFromTitle(title, processName);
-
-                var snapshot = new WindowSnapshot
+                catch (Exception ex)
                 {
-                    Id = Guid.NewGuid().ToString(),
-                    WorkspaceId = workspaceId,
-                    ProcessName = processName,
-                    ExecutablePath = exePath,
-                    CommandLine = commandLine,
-                    WindowTitle = title,
-                    ClassName = className,
-                    ShowCmd = wp.showCmd,
-                    Flags = wp.flags,
-                    NormalLeft = wp.rcNormalPosition.Left,
-                    NormalTop = wp.rcNormalPosition.Top,
-                    NormalRight = wp.rcNormalPosition.Right,
-                    NormalBottom = wp.rcNormalPosition.Bottom,
-                    ZOrder = zOrder++,
-                    AppIconBase64 = iconBase64
-                };
-
-                snapshots.Add(snapshot);
-                return true;
+                    App.Log($"[WindowCapture] EnumWindows exception: {ex.Message}");
+                    return true;
+                }
             }, IntPtr.Zero);
 
             // Capture desktop thumbnail

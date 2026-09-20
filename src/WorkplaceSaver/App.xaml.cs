@@ -16,6 +16,7 @@ namespace WorkplaceSaver
     public partial class App : System.Windows.Application
     {
         private static Mutex? _mutex;
+        private static bool _ownsMutex;
         private const string MutexName = "WorkplaceSaver_SingleInstance_Mutex";
 
         private System.Windows.Forms.NotifyIcon? _trayIcon;
@@ -58,10 +59,17 @@ namespace WorkplaceSaver
                 args.Handled = true;
             };
 
+            TaskScheduler.UnobservedTaskException += (s, args) =>
+            {
+                Log($"UNOBSERVED TASK: {args.Exception}");
+                args.SetObserved();
+            };
+
             Log("Application starting...");
 
             // 1. Single-Instance Check
             _mutex = new Mutex(true, MutexName, out bool isNewInstance);
+            _ownsMutex = isNewInstance;
             if (!isNewInstance)
             {
                 Log("Another instance detected. Bringing existing window to foreground.");
@@ -307,8 +315,19 @@ namespace WorkplaceSaver
                 _trayIcon.Dispose();
                 _trayIcon = null;
             }
-            _mutex?.ReleaseMutex();
+            if (_ownsMutex && _mutex != null)
+            {
+                try
+                {
+                    _mutex.ReleaseMutex();
+                }
+                catch (Exception ex)
+                {
+                    Log($"Error releasing mutex: {ex.Message}");
+                }
+            }
             _mutex?.Dispose();
+            _mutex = null;
             base.OnExit(e);
         }
     }

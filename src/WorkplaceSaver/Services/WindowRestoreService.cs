@@ -68,99 +68,107 @@ namespace WorkplaceSaver.Services
 
             NativeMethods.EnumWindows((hWnd, lParam) =>
             {
-                if (claimedHwnds != null && claimedHwnds.Contains(hWnd))
-                    return true;
-
-                if (!NativeMethods.IsWindowVisible(hWnd))
-                    return true;
-
-                // Ignore cloaked windows (e.g. inactive virtual desktop or suspended UWP)
-                int cloaked = 0;
-                int hr = NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_CLOAKED, out cloaked, sizeof(int));
-                if (hr == 0 && cloaked != 0)
-                    return true;
-
-                // Ensure it is a root window or top-level popup (exclude child/helper windows)
-                IntPtr root = NativeMethods.GetAncestor(hWnd, NativeMethods.GA_ROOTOWNER);
-                if (root != IntPtr.Zero && root != hWnd && NativeMethods.GetLastActivePopup(root) != hWnd)
-                    return true;
-
-                // Exclude tool windows unless explicitly marked as app window
-                long exStyle = NativeMethods.GetWindowLongPtr(hWnd, NativeMethods.GWL_EXSTYLE).ToInt64();
-                if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0 && (exStyle & NativeMethods.WS_EX_APPWINDOW) == 0)
-                    return true;
-
-                NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
-                if (!targetPids.Contains(pid))
-                    return true;
-
-                // Match class name
-                var sbClass = new StringBuilder(256);
-                NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
-                string className = sbClass.ToString();
-
-                int titleLength = NativeMethods.GetWindowTextLength(hWnd);
-                var sbTitle = new StringBuilder(titleLength + 1);
-                NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
-                string title = sbTitle.ToString().Trim();
-
-                if (isExplorer)
+                try
                 {
-                    // File Explorer folder windows MUST have CabinetWClass
-                    if (!className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase))
+                    if (claimedHwnds != null && claimedHwnds.Contains(hWnd))
                         return true;
 
-                    if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
-                        (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                         title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                         snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        foundHwnd = hWnd;
-                        return false;
-                    }
+                    if (!NativeMethods.IsWindowVisible(hWnd))
+                        return true;
 
-                    // Also check via COM folder path
-                    if (!string.IsNullOrEmpty(snapshot.CommandLine))
+                    // Ignore cloaked windows (e.g. inactive virtual desktop or suspended UWP)
+                    int cloaked = 0;
+                    int hr = NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_CLOAKED, out cloaked, sizeof(int));
+                    if (hr == 0 && cloaked != 0)
+                        return true;
+
+                    // Ensure it is a root window or top-level popup (exclude child/helper windows)
+                    IntPtr root = NativeMethods.GetAncestor(hWnd, NativeMethods.GA_ROOTOWNER);
+                    if (root != IntPtr.Zero && root != hWnd && NativeMethods.GetLastActivePopup(root) != hWnd)
+                        return true;
+
+                    // Exclude tool windows unless explicitly marked as app window
+                    long exStyle = NativeMethods.GetWindowLongPtr(hWnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+                    if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0 && (exStyle & NativeMethods.WS_EX_APPWINDOW) == 0)
+                        return true;
+
+                    NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+                    if (!targetPids.Contains(pid))
+                        return true;
+
+                    // Match class name
+                    var sbClass = new StringBuilder(256);
+                    NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
+                    string className = sbClass.ToString();
+
+                    int titleLength = NativeMethods.GetWindowTextLength(hWnd);
+                    var sbTitle = new StringBuilder(titleLength + 1);
+                    NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
+                    string title = sbTitle.ToString().Trim();
+
+                    if (isExplorer)
                     {
-                        string? folder = WindowCaptureService.GetExplorerFolderPath(hWnd);
-                        if (folder != null && folder.Equals(snapshot.CommandLine, StringComparison.OrdinalIgnoreCase))
+                        // File Explorer folder windows MUST have CabinetWClass
+                        if (!className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase))
+                            return true;
+
+                        if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                            (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                             title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                             snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
                         {
                             foundHwnd = hWnd;
                             return false;
                         }
+
+                        // Also check via COM folder path
+                        if (!string.IsNullOrEmpty(snapshot.CommandLine))
+                        {
+                            string? folder = WindowCaptureService.GetExplorerFolderPath(hWnd);
+                            if (folder != null && folder.Equals(snapshot.CommandLine, StringComparison.OrdinalIgnoreCase))
+                            {
+                                foundHwnd = hWnd;
+                                return false;
+                            }
+                        }
+
+                        return true; // Never match other shell windows for explorer
                     }
 
-                    return true; // Never match other shell windows for explorer
+                    bool classMatches = string.IsNullOrEmpty(snapshot.ClassName) ||
+                                        className.Equals(snapshot.ClassName, StringComparison.OrdinalIgnoreCase);
+
+                    // Exact title match (highest priority)
+                    if (!string.IsNullOrEmpty(snapshot.WindowTitle) && title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase))
+                    {
+                        foundHwnd = hWnd;
+                        return false; // stop enumeration
+                    }
+
+                    // Substring / prefix match (e.g. Antigravity chat or project title changes)
+                    if (!string.IsNullOrEmpty(snapshot.WindowTitle) && classMatches &&
+                        (title.StartsWith(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                         snapshot.WindowTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase) ||
+                         title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                         snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        foundHwnd = hWnd;
+                        // Keep looking in case an exact match appears later
+                    }
+
+                    // Fallback: match by process name and class name with non-empty title
+                    if (foundHwnd == IntPtr.Zero && titleLength > 0 && classMatches)
+                    {
+                        foundHwnd = hWnd;
+                    }
+
+                    return true;
                 }
-
-                bool classMatches = string.IsNullOrEmpty(snapshot.ClassName) ||
-                                    className.Equals(snapshot.ClassName, StringComparison.OrdinalIgnoreCase);
-
-                // Exact title match (highest priority)
-                if (!string.IsNullOrEmpty(snapshot.WindowTitle) && title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase))
+                catch (Exception ex)
                 {
-                    foundHwnd = hWnd;
-                    return false; // stop enumeration
+                    Debug.WriteLine($"[FindExistingWindow] EnumWindows exception: {ex.Message}");
+                    return true;
                 }
-
-                // Substring / prefix match (e.g. Antigravity chat or project title changes)
-                if (!string.IsNullOrEmpty(snapshot.WindowTitle) && classMatches &&
-                    (title.StartsWith(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                     snapshot.WindowTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase) ||
-                     title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                     snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
-                {
-                    foundHwnd = hWnd;
-                    // Keep looking in case an exact match appears later
-                }
-
-                // Fallback: match by process name and class name with non-empty title
-                if (foundHwnd == IntPtr.Zero && titleLength > 0 && classMatches)
-                {
-                    foundHwnd = hWnd;
-                }
-
-                return true;
             }, IntPtr.Zero);
 
 
@@ -200,32 +208,39 @@ namespace WorkplaceSaver.Services
                         IntPtr foundCabinetHwnd = IntPtr.Zero;
                         NativeMethods.EnumWindows((hWnd, lParam) =>
                         {
-                            if (!NativeMethods.IsWindowVisible(hWnd)) return true;
-
-                            var sbClass = new StringBuilder(256);
-                            NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
-                            if (!sbClass.ToString().Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase)) return true;
-
-                            int titleLength = NativeMethods.GetWindowTextLength(hWnd);
-                            var sbTitle = new StringBuilder(titleLength + 1);
-                            NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
-                            string title = sbTitle.ToString().Trim();
-
-                            if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
-                                (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                                 title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
-                                 snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                            try
                             {
-                                foundCabinetHwnd = hWnd;
-                                return false;
-                            }
+                                if (!NativeMethods.IsWindowVisible(hWnd)) return true;
 
-                            if (foundCabinetHwnd == IntPtr.Zero && titleLength > 0)
+                                var sbClass = new StringBuilder(256);
+                                NativeMethods.GetClassName(hWnd, sbClass, sbClass.Capacity);
+                                if (!sbClass.ToString().Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase)) return true;
+
+                                int titleLength = NativeMethods.GetWindowTextLength(hWnd);
+                                var sbTitle = new StringBuilder(titleLength + 1);
+                                NativeMethods.GetWindowText(hWnd, sbTitle, sbTitle.Capacity);
+                                string title = sbTitle.ToString().Trim();
+
+                                if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                                    (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                     title.Contains(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                     snapshot.WindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    foundCabinetHwnd = hWnd;
+                                    return false;
+                                }
+
+                                if (foundCabinetHwnd == IntPtr.Zero && titleLength > 0)
+                                {
+                                    foundCabinetHwnd = hWnd;
+                                }
+
+                                return true;
+                            }
+                            catch
                             {
-                                foundCabinetHwnd = hWnd;
+                                return true;
                             }
-
-                            return true;
                         }, IntPtr.Zero);
 
                         if (foundCabinetHwnd != IntPtr.Zero)
@@ -256,7 +271,12 @@ namespace WorkplaceSaver.Services
                 var proc = Process.Start(regularPsi);
                 if (proc == null) return IntPtr.Zero;
 
-                uint launchedPid = (uint)proc.Id;
+                uint launchedPid = 0;
+                try
+                {
+                    launchedPid = (uint)proc.Id;
+                }
+                catch { }
 
                 // Poll for the window to appear (up to 5 seconds)
                 for (int i = 0; i < 35; i++)
@@ -266,20 +286,27 @@ namespace WorkplaceSaver.Services
                     IntPtr foundHwnd = IntPtr.Zero;
                     NativeMethods.EnumWindows((hWnd, lParam) =>
                     {
-                        if (!NativeMethods.IsWindowVisible(hWnd))
-                            return true;
-
-                        NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
-                        if (pid == launchedPid || IsChildOrSiblingProcess(pid, snapshot.ProcessName))
+                        try
                         {
-                            int titleLength = NativeMethods.GetWindowTextLength(hWnd);
-                            if (titleLength > 0)
+                            if (!NativeMethods.IsWindowVisible(hWnd))
+                                return true;
+
+                            NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+                            if ((launchedPid != 0 && pid == launchedPid) || IsChildOrSiblingProcess(pid, snapshot.ProcessName))
                             {
-                                foundHwnd = hWnd;
-                                return false; // Found
+                                int titleLength = NativeMethods.GetWindowTextLength(hWnd);
+                                if (titleLength > 0)
+                                {
+                                    foundHwnd = hWnd;
+                                    return false; // Found
+                                }
                             }
+                            return true;
                         }
-                        return true;
+                        catch
+                        {
+                            return true;
+                        }
                     }, IntPtr.Zero);
 
                     if (foundHwnd != IntPtr.Zero)

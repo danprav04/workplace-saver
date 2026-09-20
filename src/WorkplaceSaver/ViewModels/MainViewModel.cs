@@ -163,13 +163,17 @@ namespace WorkplaceSaver.ViewModels
             StatusMessage = message;
             IsStatusVisible = true;
 
-            Task.Delay(4000).ContinueWith(_ =>
+            _ = Task.Run(async () =>
             {
-                if (StatusMessage == message)
+                await Task.Delay(4000);
+                System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
                 {
-                    IsStatusVisible = false;
-                }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
+                    if (StatusMessage == message)
+                    {
+                        IsStatusVisible = false;
+                    }
+                });
+            });
         }
     }
 }

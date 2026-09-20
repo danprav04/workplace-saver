@@ -30,8 +30,14 @@ namespace WorkplaceSaver.Views
             // Allow dragging the window by clicking on the background
             MouseDown += (s, e) =>
             {
-                if (e.ChangedButton == MouseButton.Left)
-                    DragMove();
+                if (e.ChangedButton == MouseButton.Left && e.ButtonState == MouseButtonState.Pressed)
+                {
+                    try
+                    {
+                        DragMove();
+                    }
+                    catch (InvalidOperationException) { }
+                }
             };
         }
 

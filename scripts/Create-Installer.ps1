@@ -92,10 +92,13 @@ Write-Host "  Using Inno Setup: $isccPath" -ForegroundColor Gray
 # 3. Publish Release Binary
 # ---------------------------------------------------------------------
 Write-Host "`n[3/5] Publishing Release build of Workplace Saver..." -ForegroundColor Yellow
+$wasRunning = [bool](Get-Process -Name WorkplaceSaver -ErrorAction SilentlyContinue)
 if (Test-Path $PublishDir) {
     # Stop running instance if locking publish files
-    Stop-Process -Name WorkplaceSaver -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 300
+    if ($wasRunning) {
+        Stop-Process -Name WorkplaceSaver -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 300
+    }
     Remove-Item $PublishDir -Recurse -Force
 }
 
@@ -302,6 +305,14 @@ if ($UploadRelease) {
 } else {
     Write-Host "`n[5/5] Skipping GitHub upload (-UploadRelease was not specified)." -ForegroundColor Gray
     Write-Host "  To upload, run: .\Create-Installer.ps1 -Version '$Version' -UploadRelease" -ForegroundColor Gray
+}
+
+if ($wasRunning) {
+    Write-Host "`n  Relaunching Workplace Saver in user session..." -ForegroundColor Cyan
+    $exe = Join-Path $PublishDir "WorkplaceSaver.exe"
+    if (Test-Path $exe) {
+        wmic process call create $exe | Out-Null
+    }
 }
 
 Write-Host "`nAll done!" -ForegroundColor Green
