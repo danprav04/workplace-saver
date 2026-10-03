@@ -48,6 +48,26 @@ namespace WorkplaceSaver.Native
         // --- Window Placement & Positioning ---
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll", EntryPoint = "IsWindowArranged", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowArrangedInternal(IntPtr hWnd);
+
+        public static bool IsWindowArranged(IntPtr hWnd)
+        {
+            try
+            {
+                return IsWindowArrangedInternal(hWnd);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -159,6 +179,7 @@ namespace WorkplaceSaver.Native
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOREDRAW = 0x0008;
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const uint SWP_FRAMECHANGED = 0x0020;
         public const uint SWP_SHOWWINDOW = 0x0040;
 
         public const int WM_HOTKEY = 0x0312;

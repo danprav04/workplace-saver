@@ -29,19 +29,33 @@ namespace WorkplaceSaver.Services
             {
                 try
                 {
+                    bool wasNewlyLaunched = false;
                     IntPtr hWnd = FindExistingWindow(windowSnapshot, claimedHwnds);
 
                     if (hWnd == IntPtr.Zero)
                     {
                         // Application is not currently open — launch it
-                        hWnd = await LaunchAndFindWindowAsync(windowSnapshot);
+                        hWnd = await LaunchAndFindWindowAsync(windowSnapshot, claimedHwnds);
+                        wasNewlyLaunched = (hWnd != IntPtr.Zero);
                     }
+
 
                     if (hWnd != IntPtr.Zero)
                     {
                         claimedHwnds.Add(hWnd);
                         ApplyWindowPlacement(hWnd, windowSnapshot);
                         restoredCount++;
+
+                        if (wasNewlyLaunched)
+                        {
+                            // Re-apply after a brief delay so Electron/Qt apps (e.g. Obsidian, OBS)
+                            // do not overwrite our placement with their internal startup geometry
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(400);
+                                ApplyWindowPlacement(hWnd, windowSnapshot);
+                            });
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -58,6 +72,9 @@ namespace WorkplaceSaver.Services
         {
             IntPtr foundHwnd = IntPtr.Zero;
             bool isExplorer = snapshot.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
+            bool isResolve = DaVinciResolveService.IsResolveProcess(snapshot.ProcessName);
+            bool isBrowser = BrowserTabService.IsBrowserProcess(snapshot.ProcessName);
+            string? targetResolveProject = isResolve ? DaVinciResolveService.ExtractProjectName(snapshot.CommandLine, snapshot.WindowTitle) : null;
 
             // Look for running process matching ProcessName
             var processes = Process.GetProcessesByName(snapshot.ProcessName);
@@ -135,6 +152,34 @@ namespace WorkplaceSaver.Services
                         return true; // Never match other shell windows for explorer
                     }
 
+                    if (isResolve)
+                    {
+                        // For DaVinci Resolve, match if the window title contains the saved project name
+                        if (!string.IsNullOrEmpty(targetResolveProject) &&
+                            title.Contains(targetResolveProject, StringComparison.OrdinalIgnoreCase))
+                        {
+                            foundHwnd = hWnd;
+                            return false;
+                        }
+                        // Do not let generic fallback match an unrelated project in Resolve
+                        return true;
+                    }
+
+                    if (isBrowser)
+                    {
+                        // For browsers, match if title matches or starts with snapshot title
+                        if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                            (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                             title.StartsWith(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                             snapshot.WindowTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            foundHwnd = hWnd;
+                            return false;
+                        }
+                        // Do not let generic fallback match an unrelated browser window with different tabs
+                        return true;
+                    }
+
                     bool classMatches = string.IsNullOrEmpty(snapshot.ClassName) ||
                                         className.Equals(snapshot.ClassName, StringComparison.OrdinalIgnoreCase);
 
@@ -175,9 +220,11 @@ namespace WorkplaceSaver.Services
             return foundHwnd;
         }
 
-        private static async Task<IntPtr> LaunchAndFindWindowAsync(WindowSnapshot snapshot)
+        private static async Task<IntPtr> LaunchAndFindWindowAsync(WindowSnapshot snapshot, HashSet<IntPtr>? claimedHwnds = null)
         {
             bool isExplorer = snapshot.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
+            bool isResolve = DaVinciResolveService.IsResolveProcess(snapshot.ProcessName);
+            bool isBrowser = BrowserTabService.IsBrowserProcess(snapshot.ProcessName);
 
             try
             {
@@ -210,6 +257,9 @@ namespace WorkplaceSaver.Services
                         {
                             try
                             {
+                                if (claimedHwnds != null && claimedHwnds.Contains(hWnd))
+                                    return true;
+
                                 if (!NativeMethods.IsWindowVisible(hWnd)) return true;
 
                                 var sbClass = new StringBuilder(256);
@@ -253,9 +303,27 @@ namespace WorkplaceSaver.Services
                 if (string.IsNullOrWhiteSpace(snapshot.ExecutablePath) || !File.Exists(snapshot.ExecutablePath))
                     return IntPtr.Zero;
 
-                // Regular application
+                // Application launch arguments
                 string? regularArgs = snapshot.CommandLine;
-                if (string.IsNullOrWhiteSpace(regularArgs) && !string.IsNullOrWhiteSpace(snapshot.WindowTitle))
+                if (isResolve)
+                {
+                    // Configure DaVinci Resolve preferences so it automatically loads the saved project on launch
+                    string? projectName = DaVinciResolveService.ExtractProjectName(snapshot.CommandLine, snapshot.WindowTitle);
+                    if (!string.IsNullOrWhiteSpace(projectName))
+                    {
+                        DaVinciResolveService.PrepareForRestore(projectName);
+                    }
+                    // Resolve.exe does not take CLI project arguments; it loads via prepared config
+                    regularArgs = string.Empty;
+                }
+                else if (isBrowser)
+                {
+                    if (string.IsNullOrWhiteSpace(regularArgs) && !string.IsNullOrWhiteSpace(snapshot.CommandLine))
+                    {
+                        regularArgs = snapshot.CommandLine;
+                    }
+                }
+                else if (string.IsNullOrWhiteSpace(regularArgs) && !string.IsNullOrWhiteSpace(snapshot.WindowTitle))
                 {
                     regularArgs = WindowCaptureService.ResolveDocumentPathFromTitle(snapshot.WindowTitle, snapshot.ProcessName);
                 }
@@ -278,8 +346,8 @@ namespace WorkplaceSaver.Services
                 }
                 catch { }
 
-                // Poll for the window to appear (up to 5 seconds)
-                for (int i = 0; i < 35; i++)
+                // Poll for the window to appear (up to 7 seconds)
+                for (int i = 0; i < 45; i++)
                 {
                     await Task.Delay(150);
 
@@ -288,6 +356,9 @@ namespace WorkplaceSaver.Services
                     {
                         try
                         {
+                            if (claimedHwnds != null && claimedHwnds.Contains(hWnd))
+                                return true;
+
                             if (!NativeMethods.IsWindowVisible(hWnd))
                                 return true;
 
@@ -297,8 +368,43 @@ namespace WorkplaceSaver.Services
                                 int titleLength = NativeMethods.GetWindowTextLength(hWnd);
                                 if (titleLength > 0)
                                 {
-                                    foundHwnd = hWnd;
-                                    return false; // Found
+                                    var sb = new StringBuilder(titleLength + 1);
+                                    NativeMethods.GetWindowText(hWnd, sb, sb.Capacity);
+                                    string title = sb.ToString().Trim();
+
+                                    if (isResolve)
+                                    {
+                                        string? projectName = DaVinciResolveService.ExtractProjectName(snapshot.CommandLine, snapshot.WindowTitle);
+                                        if (!string.IsNullOrEmpty(projectName) && title.Contains(projectName, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            foundHwnd = hWnd;
+                                            return false;
+                                        }
+                                        if (title.Contains("DaVinci Resolve", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            foundHwnd = hWnd;
+                                            return false;
+                                        }
+                                    }
+                                    else if (isBrowser)
+                                    {
+                                        if (!string.IsNullOrEmpty(snapshot.WindowTitle) &&
+                                            (title.Equals(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                             title.StartsWith(snapshot.WindowTitle, StringComparison.OrdinalIgnoreCase) ||
+                                             snapshot.WindowTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase)))
+                                        {
+                                            foundHwnd = hWnd;
+                                            return false;
+                                        }
+
+                                        foundHwnd = hWnd;
+                                        return false;
+                                    }
+                                    else
+                                    {
+                                        foundHwnd = hWnd;
+                                        return false; // Found
+                                    }
                                 }
                             }
                             return true;
@@ -312,6 +418,7 @@ namespace WorkplaceSaver.Services
                     if (foundHwnd != IntPtr.Zero)
                         return foundHwnd;
                 }
+
             }
             catch (Exception ex)
             {
@@ -418,6 +525,8 @@ namespace WorkplaceSaver.Services
                     targetRect.Top = mi.rcWork.Top + 50;
                     targetRect.Right = targetRect.Left + clampedWidth;
                     targetRect.Bottom = targetRect.Top + clampedHeight;
+                    width = clampedWidth;
+                    height = clampedHeight;
                 }
             }
 
@@ -432,6 +541,12 @@ namespace WorkplaceSaver.Services
                 ptMaxPosition = new NativeMethods.POINT { X = -1, Y = -1 },
                 rcNormalPosition = targetRect
             };
+
+            // If window should be normal/snapped (not maximized), but is currently maximized, unmaximize it first
+            if (snapshot.ShowCmd != NativeMethods.SW_SHOWMAXIMIZED && NativeMethods.IsZoomed(hWnd))
+            {
+                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_RESTORE);
+            }
 
             // If minimized currently, restore it first so placement doesn't get ignored
             if (NativeMethods.IsIconic(hWnd))
@@ -450,6 +565,30 @@ namespace WorkplaceSaver.Services
                 }
 
                 NativeMethods.SetWindowPlacement(hWnd, ref wp);
+
+                if (snapshot.ShowCmd == NativeMethods.SW_SHOWMAXIMIZED)
+                {
+                    NativeMethods.SetWindowPos(
+                        hWnd,
+                        IntPtr.Zero,
+                        0, 0, 0, 0,
+                        NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW
+                    );
+                    NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOWMAXIMIZED);
+                }
+                else
+                {
+                    // Explicitly enforce exact target coordinates and size (critical for split-screen / snapped layouts)
+                    NativeMethods.SetWindowPos(
+                        hWnd,
+                        IntPtr.Zero,
+                        targetRect.Left,
+                        targetRect.Top,
+                        width,
+                        height,
+                        NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_FRAMECHANGED
+                    );
+                }
             }
             finally
             {
@@ -457,20 +596,6 @@ namespace WorkplaceSaver.Services
                 {
                     NativeMethods.SetThreadDpiAwarenessContext(prevDpiContext);
                 }
-            }
-
-            // Bring to normal Z-order and show without overriding coordinates (SWP_NOMOVE | SWP_NOSIZE)
-            NativeMethods.SetWindowPos(
-                hWnd,
-                IntPtr.Zero,
-                0, 0, 0, 0,
-                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW
-            );
-
-            // If it was captured maximized, ensure it transitions to maximized
-            if (snapshot.ShowCmd == NativeMethods.SW_SHOWMAXIMIZED)
-            {
-                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOWMAXIMIZED);
             }
         }
     }

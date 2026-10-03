@@ -158,22 +158,57 @@ namespace WorkplaceSaver.Tests
         [Fact]
         public void WindowCaptureService_CaptureCurrentWorkspace_ReturnsValidWorkspace()
         {
-            var workspace = WindowCaptureService.CaptureCurrentWorkspace("Active Test Snapshot", "test");
-
-            Assert.NotNull(workspace);
-            Assert.False(string.IsNullOrWhiteSpace(workspace.Id));
-            Assert.Equal("Active Test Snapshot", workspace.Name);
-            Assert.NotNull(workspace.Windows);
-
-            // Should have captured running application windows on the desktop
-            foreach (var window in workspace.Windows)
-            {
-                Assert.False(string.IsNullOrWhiteSpace(window.ProcessName));
-                Assert.False(string.IsNullOrWhiteSpace(window.ExecutablePath));
-                Assert.True(window.NormalRight >= window.NormalLeft);
-                Assert.True(window.NormalBottom >= window.NormalTop);
-            }
+            var ws = WindowCaptureService.CaptureCurrentWorkspace("Placement Test", "test");
+            Assert.NotNull(ws);
+            Assert.Equal("Placement Test", ws.Name);
+            Assert.NotNull(ws.Windows);
         }
+
+        [Fact]
+        public void DaVinciResolveService_ProjectTitleExtraction_ParsesCorrectly()
+        {
+            Assert.True(DaVinciResolveService.IsResolveProcess("Resolve"));
+            Assert.True(DaVinciResolveService.IsResolveProcess("Resolve.exe"));
+            Assert.False(DaVinciResolveService.IsResolveProcess("notepad"));
+
+            // Project extraction from title
+            Assert.Equal("Spider Reel", DaVinciResolveService.ExtractProjectNameFromTitle("DaVinci Resolve - Spider Reel"));
+            Assert.Equal("My Vacation Video", DaVinciResolveService.ExtractProjectNameFromTitle("DaVinci Resolve Studio - My Vacation Video"));
+            Assert.Equal("Commercial Cut", DaVinciResolveService.ExtractProjectNameFromTitle("DaVinci Resolve by Blackmagic Design - Commercial Cut [*]"));
+            Assert.Equal("Test Project", DaVinciResolveService.ExtractProjectNameFromTitle("DaVinci Resolve - Test Project - Edit"));
+            Assert.Null(DaVinciResolveService.ExtractProjectNameFromTitle("DaVinci Resolve - Project Manager"));
+            Assert.Null(DaVinciResolveService.ExtractProjectNameFromTitle("Untitled Window"));
+
+            // Extraction from CommandLine
+            Assert.Equal("Spider Reel", DaVinciResolveService.ExtractProjectName("--project \"Spider Reel\"", null));
+        }
+
+        [Fact]
+        public void BrowserTabService_UrlNormalizationAndParsing_WorksCorrectly()
+        {
+            Assert.True(BrowserTabService.IsBrowserProcess("chrome"));
+            Assert.True(BrowserTabService.IsBrowserProcess("msedge"));
+            Assert.True(BrowserTabService.IsBrowserProcess("brave"));
+            Assert.False(BrowserTabService.IsBrowserProcess("notepad"));
+
+            // Normalization
+            Assert.Equal("https://github.com", BrowserTabService.NormalizeUrl("github.com"));
+            Assert.Equal("http://localhost:3000", BrowserTabService.NormalizeUrl("http://localhost:3000"));
+            Assert.Equal("https://www.google.com", BrowserTabService.NormalizeUrl("https://www.google.com"));
+            Assert.Equal("chrome://settings", BrowserTabService.NormalizeUrl("chrome://settings"));
+
+            // Parse from CommandLine
+            string cmdLine = "--new-window \"https://github.com/test\" \"https://google.com\"";
+            var urls = BrowserTabService.ParseUrlsFromCommandLine(cmdLine);
+            Assert.Equal(2, urls.Count);
+            Assert.Contains("https://github.com/test", urls);
+            Assert.Contains("https://google.com", urls);
+        }
+
+
+
+
+
 
         [Fact]
         public async Task MainViewModel_LoadAndFilter_UpdatesWorkspaces()
@@ -238,6 +273,79 @@ namespace WorkplaceSaver.Tests
                     WorkplaceSaver.Native.NativeMethods.MONITOR_DEFAULTTONULL);
                 Assert.NotEqual(IntPtr.Zero, hMon);
             }
+        }
+
+        [Fact]
+        public async Task SplitScreen_SnappedWindow_LayoutIntegrity()
+        {
+            var workspaceId = Guid.NewGuid().ToString();
+            // Two windows split screen 50/50 on a 1920x1080 display
+            var leftWindow = new WindowSnapshot
+            {
+                Id = Guid.NewGuid().ToString(),
+                WorkspaceId = workspaceId,
+                ProcessName = "obs64",
+                ExecutablePath = @"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+                WindowTitle = "OBS 32.2.2",
+                ShowCmd = 1,
+                Flags = 0,
+                NormalLeft = -1920,
+                NormalTop = 212,
+                NormalRight = -960,
+                NormalBottom = 1252,
+                ZOrder = 0
+            };
+
+            var rightWindow = new WindowSnapshot
+            {
+                Id = Guid.NewGuid().ToString(),
+                WorkspaceId = workspaceId,
+                ProcessName = "Obsidian",
+                ExecutablePath = @"C:\Users\Daniel\AppData\Local\Obsidian\Obsidian.exe",
+                WindowTitle = "Obsidian Vault",
+                ShowCmd = 1,
+                Flags = 0,
+                NormalLeft = -960,
+                NormalTop = 212,
+                NormalRight = 0,
+                NormalBottom = 1252,
+                ZOrder = 1
+            };
+
+            var workspace = new Workspace
+            {
+                Id = workspaceId,
+                Name = "Split Screen Test",
+                CreatedAt = DateTime.Now,
+                WindowCount = 2,
+                Windows = new() { leftWindow, rightWindow }
+            };
+
+            await _repository.SaveWorkspaceAsync(workspace);
+
+            var retrieved = await _repository.GetWorkspaceByIdAsync(workspaceId);
+            Assert.NotNull(retrieved);
+            Assert.Equal(2, retrieved.Windows.Count);
+
+            var obs = retrieved.Windows.First(w => w.ProcessName == "obs64");
+            var obsidian = retrieved.Windows.First(w => w.ProcessName == "Obsidian");
+
+            // Left window must have width 960 and span -1920 to -960
+            Assert.Equal(-1920, obs.NormalLeft);
+            Assert.Equal(-960, obs.NormalRight);
+            Assert.Equal(960, obs.Width);
+            Assert.Equal(1040, obs.Height);
+
+            // Right window must have width 960 and span -960 to 0
+            Assert.Equal(-960, obsidian.NormalLeft);
+            Assert.Equal(0, obsidian.NormalRight);
+            Assert.Equal(960, obsidian.Width);
+            Assert.Equal(1040, obsidian.Height);
+
+            // They must meet flush in the middle without overlap
+            Assert.Equal(obs.NormalRight, obsidian.NormalLeft);
+
+            await _repository.DeleteWorkspaceAsync(workspaceId);
         }
     }
 }

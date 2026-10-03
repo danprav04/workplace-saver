@@ -30,6 +30,16 @@ namespace WorkplaceSaver.Services
             string workspaceId = Guid.NewGuid().ToString();
             int currentPid = Process.GetCurrentProcess().Id;
 
+            try
+            {
+                IntPtr hDesk = NativeMethods.OpenDesktop("Default", 0, false, 0x01FF);
+                if (hDesk != IntPtr.Zero)
+                {
+                    NativeMethods.SetThreadDesktop(hDesk);
+                }
+            }
+            catch { }
+
             var snapshots = new List<WindowSnapshot>();
             int zOrder = 0;
 
@@ -43,6 +53,8 @@ namespace WorkplaceSaver.Services
                     // Get placement under the target window's DPI context to prevent coordinate virtualization
                     var wp = new NativeMethods.WINDOWPLACEMENT();
                     wp.length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
+                    NativeMethods.RECT windowRect = default;
+                    bool hasWindowRect = false;
                     IntPtr prevDpiContext = IntPtr.Zero;
 
                     try
@@ -55,6 +67,8 @@ namespace WorkplaceSaver.Services
 
                         if (!NativeMethods.GetWindowPlacement(hWnd, ref wp))
                             return true;
+
+                        hasWindowRect = NativeMethods.GetWindowRect(hWnd, out windowRect);
                     }
                     finally
                     {
@@ -90,10 +104,45 @@ namespace WorkplaceSaver.Services
                     // Check for icon
                     string? iconBase64 = ScreenshotService.ExtractIconBase64(exePath);
 
-                    // If Explorer window, capture active folder path; for other apps, resolve open document/project file
-                    string? commandLine = className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) 
-                        ? GetExplorerFolderPath(hWnd, title) 
-                        : ResolveDocumentPathFromTitle(title, processName);
+                    // Resolve app-specific command line: File Explorer folders, DaVinci Resolve projects, Chrome tabs, or document files
+                    string? commandLine = null;
+                    if (className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase))
+                    {
+                        commandLine = GetExplorerFolderPath(hWnd, title);
+                    }
+                    else if (DaVinciResolveService.IsResolveProcess(processName))
+                    {
+                        commandLine = DaVinciResolveService.CaptureProject(hWnd, title);
+                    }
+                    else if (BrowserTabService.IsBrowserProcess(processName))
+                    {
+                        commandLine = BrowserTabService.CaptureTabs(hWnd, processName);
+                    }
+                    else
+                    {
+                        commandLine = ResolveDocumentPathFromTitle(title, processName);
+                    }
+
+
+                    int normalLeft = wp.rcNormalPosition.Left;
+                    int normalTop = wp.rcNormalPosition.Top;
+                    int normalRight = wp.rcNormalPosition.Right;
+                    int normalBottom = wp.rcNormalPosition.Bottom;
+
+                    bool isIconic = NativeMethods.IsIconic(hWnd) || wp.showCmd == NativeMethods.SW_SHOWMINIMIZED;
+                    bool isZoomed = NativeMethods.IsZoomed(hWnd) || wp.showCmd == NativeMethods.SW_SHOWMAXIMIZED;
+
+                    // When a window is neither minimized nor maximized, it is actively placed on the desktop
+                    // (floating, snapped side-by-side / split screen, tiled, quadrant, etc.).
+                    // In Windows 10/11, GetWindowPlacement's rcNormalPosition retains stale pre-snap floating bounds
+                    // when a window is Aero Snapped. Using GetWindowRect captures the real on-screen split/snapped geometry.
+                    if (!isIconic && !isZoomed && hasWindowRect && windowRect.Width > 0 && windowRect.Height > 0)
+                    {
+                        normalLeft = windowRect.Left;
+                        normalTop = windowRect.Top;
+                        normalRight = windowRect.Right;
+                        normalBottom = windowRect.Bottom;
+                    }
 
                     var snapshot = new WindowSnapshot
                     {
@@ -106,10 +155,10 @@ namespace WorkplaceSaver.Services
                         ClassName = className,
                         ShowCmd = wp.showCmd,
                         Flags = wp.flags,
-                        NormalLeft = wp.rcNormalPosition.Left,
-                        NormalTop = wp.rcNormalPosition.Top,
-                        NormalRight = wp.rcNormalPosition.Right,
-                        NormalBottom = wp.rcNormalPosition.Bottom,
+                        NormalLeft = normalLeft,
+                        NormalTop = normalTop,
+                        NormalRight = normalRight,
+                        NormalBottom = normalBottom,
                         ZOrder = zOrder++,
                         AppIconBase64 = iconBase64
                     };
